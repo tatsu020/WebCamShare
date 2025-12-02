@@ -46,6 +46,7 @@ uv run python -m nuitka ^
     --nofollow-import-to=numpy.conftest ^
     --nofollow-import-to=PIL.tests ^
     --nofollow-import-to=cv2.tests ^
+    --nofollow-import-to=comtypes.test ^
     --output-filename=WebCamShare.exe ^
     --output-dir=dist ^
     --company-name="WebCamShare" ^
