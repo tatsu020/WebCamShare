@@ -5,75 +5,175 @@ from PIL import Image, ImageTk
 from .client import StreamClient
 from .virtual_cam import VirtualCamera
 from utils.network import ServerDiscovery
+from utils.theme import Theme
 import tkinter as tk
 
 class ReceiverApp(ctk.CTkFrame):
-    def __init__(self, master):
-        super().__init__(master)
+    def __init__(self, master, on_back=None):
+        super().__init__(master, fg_color=Theme.BG_DARK)
         self.master = master
+        self.on_back = on_back
         self.pack(fill="both", expand=True)
 
         self.client = None
         self.virtual_cam = None
         self.is_running = False
         self.thread = None
-        self.photo_image = None  # PhotoImage参照を保持
-        self.discovered_servers = []  # 検出されたサーバーリスト
-        self._pending_frame = False  # フレーム処理中フラグ（スキップ用）
-        self._canvas_size = (640, 360)  # キャンバスサイズのキャッシュ
+        self.photo_image = None
+        self.discovered_servers = []
+        self._pending_frame = False
+        self._canvas_size = (640, 360)
 
         self.setup_ui()
 
     def setup_ui(self):
-        # Title
-        self.label_title = ctk.CTkLabel(self, text="Virtual Camera Receiver", font=("Arial", 20, "bold"))
-        self.label_title.pack(pady=10)
+        # Header section
+        self.frame_header = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_header.pack(fill="x", padx=Theme.PAD_LG, pady=(Theme.PAD_MD, Theme.PAD_SM))
 
-        # Controls - Row 1: Auto-discovery
-        self.frame_discovery = ctk.CTkFrame(self)
-        self.frame_discovery.pack(pady=5)
+        # Back button
+        self.btn_back = ctk.CTkButton(
+            self.frame_header,
+            text="←",
+            width=36,
+            height=36,
+            font=(Theme.FONT_FAMILY, 18),
+            fg_color=Theme.BG_INPUT,
+            hover_color="#3a3a46",
+            corner_radius=Theme.RADIUS_SM,
+            command=self._on_back
+        )
+        self.btn_back.pack(side="left", padx=(0, Theme.PAD_SM))
+
+        self.label_title = ctk.CTkLabel(
+            self.frame_header, 
+            text="🖥️ Receiver Mode", 
+            font=Theme.FONT_HEADING,
+            text_color=Theme.TEXT_PRIMARY
+        )
+        self.label_title.pack(side="left")
+
+        # Discovery card
+        self.frame_discovery = ctk.CTkFrame(
+            self, 
+            fg_color=Theme.BG_CARD,
+            corner_radius=Theme.RADIUS_SM
+        )
+        self.frame_discovery.pack(fill="x", padx=Theme.PAD_LG, pady=Theme.PAD_SM)
+
+        self.frame_discovery_inner = ctk.CTkFrame(self.frame_discovery, fg_color="transparent")
+        self.frame_discovery_inner.pack(fill="x", padx=Theme.PAD_MD, pady=Theme.PAD_MD)
 
         self.btn_discover = ctk.CTkButton(
-            self.frame_discovery, 
-            text="🔍 サーバー自動検出", 
+            self.frame_discovery_inner, 
+            text="🔍  Auto Discover", 
             command=self.discover_servers,
-            width=160
+            width=150,
+            height=36,
+            font=Theme.FONT_BUTTON,
+            fg_color=Theme.ACCENT,
+            hover_color=Theme.ACCENT_HOVER,
+            corner_radius=Theme.RADIUS_SM
         )
-        self.btn_discover.pack(side="left", padx=5)
+        self.btn_discover.pack(side="left", padx=(0, Theme.PAD_SM))
 
         self.server_dropdown = ctk.CTkComboBox(
-            self.frame_discovery,
-            values=["検出されたサーバーがありません"],
-            width=250,
+            self.frame_discovery_inner,
+            values=["No servers found"],
+            width=300,
+            height=36,
             state="readonly",
+            font=Theme.FONT_BODY,
+            fg_color=Theme.BG_INPUT,
+            border_width=0,
+            button_color=Theme.ACCENT,
+            button_hover_color=Theme.ACCENT_HOVER,
+            dropdown_fg_color=Theme.BG_CARD,
+            corner_radius=Theme.RADIUS_SM,
             command=self.on_server_selected
         )
-        self.server_dropdown.pack(side="left", padx=5)
+        self.server_dropdown.pack(side="left", fill="x", expand=True)
 
-        # Controls - Row 2: Manual IP input
-        self.frame_controls = ctk.CTkFrame(self)
-        self.frame_controls.pack(pady=5)
+        # Manual connection card
+        self.frame_controls = ctk.CTkFrame(
+            self, 
+            fg_color=Theme.BG_CARD,
+            corner_radius=Theme.RADIUS_SM
+        )
+        self.frame_controls.pack(fill="x", padx=Theme.PAD_LG, pady=Theme.PAD_SM)
 
-        self.label_ip = ctk.CTkLabel(self.frame_controls, text="Sender IP:")
-        self.label_ip.pack(side="left", padx=5)
+        self.frame_controls_inner = ctk.CTkFrame(self.frame_controls, fg_color="transparent")
+        self.frame_controls_inner.pack(fill="x", padx=Theme.PAD_MD, pady=Theme.PAD_MD)
 
-        self.entry_ip = ctk.CTkEntry(self.frame_controls, width=120)
+        self.label_ip = ctk.CTkLabel(
+            self.frame_controls_inner, 
+            text="IP Address",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        self.label_ip.pack(side="left", padx=(0, Theme.PAD_SM))
+
+        self.entry_ip = ctk.CTkEntry(
+            self.frame_controls_inner, 
+            width=180,
+            height=36,
+            font=Theme.FONT_BODY,
+            fg_color=Theme.BG_INPUT,
+            border_width=0,
+            corner_radius=Theme.RADIUS_SM
+        )
         self.entry_ip.insert(0, "192.168.1.X")
-        self.entry_ip.pack(side="left", padx=5)
+        self.entry_ip.pack(side="left", padx=Theme.PAD_XS)
 
-        self.btn_connect = ctk.CTkButton(self.frame_controls, text="Connect", command=self.toggle_connection)
-        self.btn_connect.pack(side="left", padx=10)
+        self.btn_connect = ctk.CTkButton(
+            self.frame_controls_inner, 
+            text="▶  Connect", 
+            command=self.toggle_connection,
+            height=36,
+            width=140,
+            font=Theme.FONT_BUTTON,
+            fg_color=Theme.ACCENT,
+            hover_color=Theme.ACCENT_HOVER,
+            corner_radius=Theme.RADIUS_SM
+        )
+        self.btn_connect.pack(side="right", padx=Theme.PAD_XS)
 
-        # Status
-        self.label_status = ctk.CTkLabel(self, text="Status: Disconnected", text_color="gray")
-        self.label_status.pack(pady=5)
+        # Status indicator
+        self.frame_status = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_status.pack(fill="x", padx=Theme.PAD_LG, pady=Theme.PAD_XS)
 
-        # Preview - Canvasを使用
-        self.preview_canvas = tk.Canvas(self, width=640, height=360, bg="black", highlightthickness=0)
-        self.preview_canvas.pack(pady=10, fill="both", expand=True)
-        self.preview_text = self.preview_canvas.create_text(0, 0, text="Preview", fill="white", font=("Arial", 16), anchor="center")
+        self.label_status = ctk.CTkLabel(
+            self.frame_status, 
+            text="● Disconnected", 
+            font=Theme.FONT_SMALL,
+            text_color=Theme.STATUS_IDLE
+        )
+        self.label_status.pack(side="left")
+
+        # Preview area
+        self.frame_preview = ctk.CTkFrame(
+            self, 
+            fg_color=Theme.BG_CARD,
+            corner_radius=Theme.RADIUS_MD
+        )
+        self.frame_preview.pack(fill="both", expand=True, padx=Theme.PAD_LG, pady=Theme.PAD_MD)
+
+        self.preview_canvas = tk.Canvas(
+            self.frame_preview, 
+            width=640, 
+            height=360, 
+            bg=Theme.BG_PREVIEW, 
+            highlightthickness=0
+        )
+        self.preview_canvas.pack(fill="both", expand=True, padx=Theme.PAD_SM, pady=Theme.PAD_SM)
+        self.preview_text = self.preview_canvas.create_text(
+            0, 0, 
+            text="Stream Preview", 
+            fill=Theme.TEXT_SECONDARY, 
+            font=Theme.FONT_BODY, 
+            anchor="center"
+        )
         
-        # Canvasサイズ変更時にテキストを中央に配置
         self.preview_canvas.bind("<Configure>", self._on_canvas_resize)
     
     def _on_canvas_resize(self, event):
@@ -89,8 +189,8 @@ class ReceiverApp(ctk.CTkFrame):
 
     def discover_servers(self):
         """LANでサーバーを自動検出"""
-        self.btn_discover.configure(state="disabled", text="🔍 検索中...")
-        self.label_status.configure(text="サーバーを検索中...", text_color="yellow")
+        self.btn_discover.configure(state="disabled", text="🔍  Searching...")
+        self.label_status.configure(text="● Searching for servers...", text_color=Theme.STATUS_WARNING)
         
         def search():
             discovery = ServerDiscovery(timeout=3.0)
@@ -101,39 +201,37 @@ class ReceiverApp(ctk.CTkFrame):
     
     def update_server_list(self, servers):
         """検出結果をUIに反映"""
-        self.btn_discover.configure(state="normal", text="🔍 サーバー自動検出")
+        self.btn_discover.configure(state="normal", text="🔍  Auto Discover")
         self.discovered_servers = servers
         
         if servers:
-            # サーバーが見つかった
             server_names = [f"{s['name']} - {s['ip']}:{s['port']}" for s in servers]
             self.server_dropdown.configure(values=server_names)
             self.server_dropdown.set(server_names[0])
             
-            # 単一サーバーの場合は自動でIPを入力
             if len(servers) == 1:
                 self.entry_ip.delete(0, "end")
                 self.entry_ip.insert(0, servers[0]['ip'])
                 self.label_status.configure(
-                    text=f"✓ サーバー検出: {servers[0]['name']}", 
-                    text_color="green"
+                    text=f"● Found: {servers[0]['name']} — Connecting...", 
+                    text_color=Theme.STATUS_SUCCESS
                 )
+                self.master.after(100, self.start_receiving)
             else:
                 self.label_status.configure(
-                    text=f"✓ {len(servers)}台のサーバーを検出 - ドロップダウンから選択", 
-                    text_color="green"
+                    text=f"● {len(servers)} servers found — Select from dropdown", 
+                    text_color=Theme.STATUS_SUCCESS
                 )
         else:
-            # サーバーが見つからなかった
-            self.server_dropdown.configure(values=["検出されたサーバーがありません"])
-            self.server_dropdown.set("検出されたサーバーがありません")
+            self.server_dropdown.configure(values=["No servers found"])
+            self.server_dropdown.set("No servers found")
             self.label_status.configure(
-                text="サーバーが見つかりません - 手動でIPを入力してください", 
-                text_color="orange"
+                text="● No servers found — Enter IP manually", 
+                text_color=Theme.STATUS_WARNING
             )
     
     def on_server_selected(self, choice):
-        """ドロップダウンでサーバー選択時にIPを入力欄に反映"""
+        """ドロップダウンでサーバー選択時にIPを入力欄に反映して接続"""
         if not self.discovered_servers:
             return
         
@@ -144,9 +242,14 @@ class ReceiverApp(ctk.CTkFrame):
                 self.entry_ip.delete(0, "end")
                 self.entry_ip.insert(0, server['ip'])
                 self.label_status.configure(
-                    text=f"選択: {server['name']}", 
-                    text_color="green"
+                    text=f"● Selected: {server['name']} — Connecting...", 
+                    text_color=Theme.STATUS_SUCCESS
                 )
+                if self.is_running:
+                    self.stop_receiving()
+                    self.master.after(200, self.start_receiving)
+                else:
+                    self.master.after(100, self.start_receiving)
                 break
 
     def start_receiving(self):
@@ -162,14 +265,18 @@ class ReceiverApp(ctk.CTkFrame):
             self.virtual_cam.start()
 
             self.is_running = True
-            self.btn_connect.configure(text="Disconnect", fg_color="red")
-            self.label_status.configure(text="Status: Connected", text_color="green")
+            self.btn_connect.configure(
+                text="■  Disconnect", 
+                fg_color=Theme.ACCENT_DANGER,
+                hover_color=Theme.ACCENT_DANGER_HOVER
+            )
+            self.label_status.configure(text="● Connected — Streaming", text_color=Theme.STATUS_SUCCESS)
             
             self.thread = threading.Thread(target=self.process_stream, daemon=True)
             self.thread.start()
 
         except Exception as e:
-            self.label_status.configure(text=f"Error: {e}", text_color="red")
+            self.label_status.configure(text=f"● Error: {e}", text_color=Theme.STATUS_ERROR)
             self.stop_receiving()
 
     def stop_receiving(self):
@@ -182,12 +289,15 @@ class ReceiverApp(ctk.CTkFrame):
             self.virtual_cam = None
         
         self.photo_image = None
-        self.btn_connect.configure(text="Connect", fg_color=["#3B8ED0", "#1F6AA5"])
-        self.label_status.configure(text="Status: Disconnected", text_color="gray")
+        self.btn_connect.configure(
+            text="▶  Connect", 
+            fg_color=Theme.ACCENT,
+            hover_color=Theme.ACCENT_HOVER
+        )
+        self.label_status.configure(text="● Disconnected", text_color=Theme.STATUS_IDLE)
         
-        # Canvasをクリアしてテキスト表示
         self.preview_canvas.delete("preview")
-        self.preview_canvas.itemconfig(self.preview_text, text="Preview Stopped")
+        self.preview_canvas.itemconfig(self.preview_text, text="Stream Preview")
 
     def process_stream(self):
         if not self.client:
@@ -249,3 +359,12 @@ class ReceiverApp(ctk.CTkFrame):
             print(f"Preview error: {e}")
         finally:
             self._pending_frame = False
+
+    def _on_back(self):
+        """Handle back button click"""
+        if self.on_back:
+            self.on_back()
+
+    def cleanup(self):
+        """Clean up resources before destroying"""
+        self.stop_receiving()
