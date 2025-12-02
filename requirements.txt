@@ -5,3 +5,6 @@ requests
 customtkinter
 Pillow
 pygrabber
+nuitka
+ordered-set
+zstandard

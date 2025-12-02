@@ -1,0 +1,60 @@
+@echo off
+echo ========================================
+echo WebCam Share - Nuitka Build Script
+echo ========================================
+echo.
+
+REM Check if uv is available
+uv --version >nul 2>&1
+if errorlevel 1 (
+    echo Error: uv is not installed or not in PATH
+    pause
+    exit /b 1
+)
+
+REM Install dependencies if needed
+echo Installing dependencies...
+uv pip install nuitka ordered-set zstandard
+
+echo.
+echo Building with Nuitka...
+echo This may take several minutes on first build.
+echo.
+
+uv run python -m nuitka ^
+    --standalone ^
+    --onefile ^
+    --windows-console-mode=disable ^
+    --enable-plugin=tk-inter ^
+    --include-package=sender ^
+    --include-package=receiver ^
+    --include-package=utils ^
+    --include-package=customtkinter ^
+    --include-package=cv2 ^
+    --include-package=numpy ^
+    --include-package=requests ^
+    --include-package=PIL ^
+    --include-package=pyvirtualcam ^
+    --include-package=pygrabber ^
+    --output-filename=WebCamShare.exe ^
+    --output-dir=dist ^
+    --company-name="WebCamShare" ^
+    --product-name="WebCam Share" ^
+    --file-version=1.0.0.0 ^
+    --product-version=1.0.0.0 ^
+    --file-description="WebCam Streaming and Virtual Camera App" ^
+    main.py
+
+if errorlevel 1 (
+    echo.
+    echo Build failed!
+    pause
+    exit /b 1
+)
+
+echo.
+echo ========================================
+echo Build completed successfully!
+echo Output: dist\WebCamShare.exe
+echo ========================================
+pause

@@ -1,0 +1,60 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+    
+    - name: Install dependencies
+      run: |
+        uv pip install --system -r requirements.txt
+        uv pip install --system nuitka ordered-set zstandard
+    
+    - name: Build with Nuitka
+      run: |
+        python -m nuitka `
+          --standalone `
+          --onefile `
+          --windows-console-mode=disable `
+          --enable-plugin=tk-inter `
+          --include-package=sender `
+          --include-package=receiver `
+          --include-package=utils `
+          --include-package=customtkinter `
+          --include-package=cv2 `
+          --include-package=numpy `
+          --include-package=requests `
+          --include-package=PIL `
+          --include-package=pyvirtualcam `
+          --include-package=pygrabber `
+          --output-filename=WebCamShare.exe `
+          --output-dir=dist `
+          --company-name="WebCamShare" `
+          --product-name="WebCam Share" `
+          --file-version=1.0.0.0 `
+          --product-version=1.0.0.0 `
+          --file-description="WebCam Streaming and Virtual Camera App" `
+          main.py
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/WebCamShare.exe
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
