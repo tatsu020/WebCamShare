@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 import threading
 import time
+from utils.network import ServerAnnouncer
 
 class MJPEGHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -42,6 +43,7 @@ class StreamServer:
         self.server = None
         self.thread = None
         self.running = False
+        self.announcer = ServerAnnouncer(server_port=port)
 
     def start(self):
         if self.running:
@@ -52,11 +54,19 @@ class StreamServer:
         self.running = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        
+        # Start server announcer for auto-discovery
+        self.announcer.start()
+        
         print(f"Server started at http://{self.host}:{self.port}/stream.mjpg")
 
     def stop(self):
         if self.server and self.running:
             self.running = False
+            
+            # Stop server announcer
+            self.announcer.stop()
+            
             self.server.shutdown()
             self.server.server_close()
             self.server = None
