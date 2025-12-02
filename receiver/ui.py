@@ -1,9 +1,10 @@
 import customtkinter as ctk
 import cv2
 import threading
-from PIL import Image
+from PIL import Image, ImageTk
 from .client import StreamClient
 from .virtual_cam import VirtualCamera
+import tkinter as tk
 
 class ReceiverApp(ctk.CTkFrame):
     def __init__(self, master):
@@ -15,6 +16,7 @@ class ReceiverApp(ctk.CTkFrame):
         self.virtual_cam = None
         self.is_running = False
         self.thread = None
+        self.photo_image = None  # PhotoImage参照を保持
 
         self.setup_ui()
 
@@ -41,9 +43,17 @@ class ReceiverApp(ctk.CTkFrame):
         self.label_status = ctk.CTkLabel(self, text="Status: Disconnected", text_color="gray")
         self.label_status.pack(pady=5)
 
-        # Preview
-        self.label_preview = ctk.CTkLabel(self, text="Preview")
-        self.label_preview.pack(pady=10, fill="both", expand=True)
+        # Preview - Canvasを使用
+        self.preview_canvas = tk.Canvas(self, width=640, height=360, bg="black", highlightthickness=0)
+        self.preview_canvas.pack(pady=10, fill="both", expand=True)
+        self.preview_text = self.preview_canvas.create_text(0, 0, text="Preview", fill="white", font=("Arial", 16), anchor="center")
+        
+        # Canvasサイズ変更時にテキストを中央に配置
+        self.preview_canvas.bind("<Configure>", self._on_canvas_resize)
+    
+    def _on_canvas_resize(self, event):
+        """Canvasサイズ変更時にテキストを中央に移動"""
+        self.preview_canvas.coords(self.preview_text, event.width // 2, event.height // 2)
 
     def toggle_connection(self):
         if not self.is_running:
@@ -83,9 +93,13 @@ class ReceiverApp(ctk.CTkFrame):
             self.virtual_cam.stop()
             self.virtual_cam = None
         
+        self.photo_image = None
         self.btn_connect.configure(text="Connect", fg_color=["#3B8ED0", "#1F6AA5"])
         self.label_status.configure(text="Status: Disconnected", text_color="gray")
-        self.label_preview.configure(image=None, text="Preview Stopped")
+        
+        # Canvasをクリアしてテキスト表示
+        self.preview_canvas.delete("preview")
+        self.preview_canvas.itemconfig(self.preview_text, text="Preview Stopped")
 
     def process_stream(self):
         if not self.client:
@@ -103,15 +117,35 @@ class ReceiverApp(ctk.CTkFrame):
             self.master.after(0, self.update_preview_image, frame)
 
     def update_preview_image(self, frame):
-        # Convert to RGB for Pillow
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray(frame_rgb)
+        if not self.is_running:
+            return
         
-        # Resize for preview
-        preview_width = 640
-        ratio = preview_width / image.width
-        preview_height = int(image.height * ratio)
-        image = image.resize((preview_width, preview_height))
+        try:
+            # Convert to RGB for Pillow
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            image = Image.fromarray(frame_rgb)
+            
+            # Resize for preview
+            canvas_width = self.preview_canvas.winfo_width()
+            canvas_height = self.preview_canvas.winfo_height()
+            if canvas_width < 10:
+                canvas_width = 640
+            if canvas_height < 10:
+                canvas_height = 360
+            
+            ratio = min(canvas_width / image.width, canvas_height / image.height)
+            preview_width = int(image.width * ratio)
+            preview_height = int(image.height * ratio)
+            image = image.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
 
-        ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(preview_width, preview_height))
-        self.label_preview.configure(image=ctk_image, text="")
+            # PhotoImageを保持してガベージコレクションを防ぐ
+            self.photo_image = ImageTk.PhotoImage(image)
+            
+            # Canvasに描画
+            self.preview_canvas.delete("preview")
+            self.preview_canvas.itemconfig(self.preview_text, text="")
+            x = canvas_width // 2
+            y = canvas_height // 2
+            self.preview_canvas.create_image(x, y, image=self.photo_image, tag="preview")
+        except Exception as e:
+            print(f"Preview error: {e}")
