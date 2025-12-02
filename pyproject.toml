@@ -1,0 +1,17 @@
+[project]
+name = "ecliptic-pulsar"
+version = "0.1.0"
+description = "Webcam sharing app"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python",
+    "pyvirtualcam",
+    "numpy",
+    "requests",
+    "customtkinter",
+    "pillow",
+    "pygrabber>=0.2",
+]
+
+[tool.uv]

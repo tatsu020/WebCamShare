@@ -1,0 +1,7 @@
+opencv-python
+pyvirtualcam
+numpy
+requests
+customtkinter
+Pillow
+pygrabber
