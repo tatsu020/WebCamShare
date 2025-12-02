@@ -1,0 +1,4 @@
+# Development / Build dependencies
+nuitka
+ordered-set
+zstandard

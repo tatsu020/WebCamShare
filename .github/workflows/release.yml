@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         uv pip install --system -r requirements.txt
-        uv pip install --system nuitka ordered-set zstandard
+        uv pip install --system -r requirements-dev.txt
     
     - name: Build with Nuitka
       run: |
@@ -36,12 +36,19 @@ jobs:
           --include-package=receiver `
           --include-package=utils `
           --include-package=customtkinter `
-          --include-package=cv2 `
-          --include-package=numpy `
-          --include-package=requests `
-          --include-package=PIL `
-          --include-package=pyvirtualcam `
-          --include-package=pygrabber `
+          --include-module=cv2 `
+          --include-module=numpy `
+          --include-module=requests `
+          --include-module=PIL `
+          --include-module=pyvirtualcam `
+          --include-module=pygrabber `
+          --nofollow-import-to=numpy.tests `
+          --nofollow-import-to=numpy.testing `
+          --nofollow-import-to=numpy.distutils `
+          --nofollow-import-to=numpy.f2py `
+          --nofollow-import-to=numpy.conftest `
+          --nofollow-import-to=PIL.tests `
+          --nofollow-import-to=cv2.tests `
           --output-filename=WebCamShare.exe `
           --output-dir=dist `
           --company-name="WebCamShare" `

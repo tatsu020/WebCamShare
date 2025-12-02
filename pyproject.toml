@@ -1,5 +1,5 @@
 [project]
-name = "ecliptic-pulsar"
+name = "webcamshare"
 version = "0.1.0"
 description = "Webcam sharing app"
 readme = "README.md"
@@ -12,6 +12,13 @@ dependencies = [
     "customtkinter",
     "pillow",
     "pygrabber>=0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "nuitka",
+    "ordered-set",
+    "zstandard",
 ]
 
 [tool.uv]
