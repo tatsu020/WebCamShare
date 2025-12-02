@@ -2,13 +2,22 @@ import cv2
 import threading
 import time
 import os
+import sys
 
 def get_camera_names():
     """Windowsでカメラのデバイス名を取得する"""
     try:
+        # Nuitkaビルド時にpygrabberがCOM初期化に失敗することがある
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    
+    try:
         from pygrabber.dshow_graph import FilterGraph
         graph = FilterGraph()
-        return graph.get_input_devices()
+        devices = graph.get_input_devices()
+        return devices if devices else []
     except Exception:
         return []
 

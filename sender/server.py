@@ -5,28 +5,36 @@ import time
 from utils.network import ServerAnnouncer
 
 class MJPEGHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        """HTTPサーバーのログを抑制（Nuitkaビルドでstdout問題を回避）"""
+        pass
+    
     def do_GET(self):
-        if self.path == '/stream.mjpg':
+        if self.path == '/stream.mjpg' or self.path == '/':
             self.send_response(200)
             self.send_header('Content-type', 'multipart/x-mixed-replace; boundary=frame')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
             self.end_headers()
             
             try:
                 while True:
                     frame = self.server.camera.get_jpeg_frame()
                     if frame:
+                        # MJPEGフォーマットで直接書き込み（send_headerは使わない）
                         self.wfile.write(b'--frame\r\n')
-                        self.send_header('Content-type', 'image/jpeg')
-                        self.send_header('Content-length', len(frame))
-                        self.end_headers()
+                        self.wfile.write(b'Content-Type: image/jpeg\r\n')
+                        self.wfile.write(f'Content-Length: {len(frame)}\r\n'.encode())
+                        self.wfile.write(b'\r\n')
                         self.wfile.write(frame)
                         self.wfile.write(b'\r\n')
+                        self.wfile.flush()
                     else:
                         time.sleep(0.01)
                     # Control framerate slightly to avoid overwhelming network
                     time.sleep(0.01) 
             except Exception as e:
-                print(f"Client disconnected: {e}")
+                pass  # Client disconnected
         else:
             self.send_response(404)
             self.end_headers()

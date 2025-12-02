@@ -30,12 +30,15 @@ uv run python -m nuitka ^
     --include-package=receiver ^
     --include-package=utils ^
     --include-package=customtkinter ^
+    --include-package=comtypes ^
+    --include-package=pygrabber ^
     --include-module=cv2 ^
     --include-module=numpy ^
     --include-module=requests ^
     --include-module=PIL ^
     --include-module=pyvirtualcam ^
-    --include-module=pygrabber ^
+    --include-module=pythoncom ^
+    --include-module=pywintypes ^
     --nofollow-import-to=numpy.tests ^
     --nofollow-import-to=numpy.testing ^
     --nofollow-import-to=numpy.distutils ^

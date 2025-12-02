@@ -5,3 +5,4 @@ requests
 customtkinter
 Pillow
 pygrabber
+pywin32
