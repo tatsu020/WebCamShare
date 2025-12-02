@@ -146,11 +146,7 @@ class SenderApp(ctk.CTkFrame):
         frame = self.camera.get_frame()
         if frame is not None:
             try:
-                # Convert to RGB for Pillow
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                image = Image.fromarray(frame_rgb)
-                
-                # Resize for preview (keep aspect ratio)
+                # Resize for preview (keep aspect ratio) using cv2 for performance
                 canvas_width = self.preview_canvas.winfo_width()
                 canvas_height = self.preview_canvas.winfo_height()
                 if canvas_width < 10:
@@ -158,10 +154,15 @@ class SenderApp(ctk.CTkFrame):
                 if canvas_height < 10:
                     canvas_height = 360
                 
-                ratio = min(canvas_width / image.width, canvas_height / image.height)
-                preview_width = int(image.width * ratio)
-                preview_height = int(image.height * ratio)
-                image = image.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
+                h, w = frame.shape[:2]
+                ratio = min(canvas_width / w, canvas_height / h)
+                preview_width = int(w * ratio)
+                preview_height = int(h * ratio)
+                frame_resized = cv2.resize(frame, (preview_width, preview_height))
+                
+                # Convert to RGB for Pillow
+                frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                image = Image.fromarray(frame_rgb)
 
                 # PhotoImageを保持してガベージコレクションを防ぐ
                 self.photo_image = ImageTk.PhotoImage(image)
