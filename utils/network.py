@@ -77,6 +77,21 @@ class ServerAnnouncer:
         print("ServerAnnouncer stopped")
 
 
+def get_broadcast_addresses():
+    """ローカルネットワークのブロードキャストアドレスを取得"""
+    broadcasts = ['255.255.255.255']  # フォールバック
+    try:
+        local_ip = get_local_ip()
+        if local_ip != "127.0.0.1":
+            # 一般的なサブネットマスク（/24）を仮定
+            parts = local_ip.split('.')
+            if len(parts) == 4:
+                broadcasts.insert(0, f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+    except Exception:
+        pass
+    return broadcasts
+
+
 class ServerDiscovery:
     """Receiver側: LANでサーバーを検出"""
     
@@ -92,13 +107,20 @@ class ServerDiscovery:
         sock.settimeout(0.5)
         
         try:
-            # ブロードキャストで検索メッセージを送信
-            sock.sendto(DISCOVERY_MESSAGE.encode(), ('<broadcast>', DISCOVERY_PORT))
+            # 複数のブロードキャストアドレスに送信
+            broadcast_addrs = get_broadcast_addresses()
+            for addr in broadcast_addrs:
+                try:
+                    sock.sendto(DISCOVERY_MESSAGE.encode(), (addr, DISCOVERY_PORT))
+                    print(f"Discovery sent to {addr}:{DISCOVERY_PORT}")
+                except Exception as e:
+                    print(f"Failed to send to {addr}: {e}")
             
             start_time = time.time()
             while time.time() - start_time < self.timeout:
                 try:
                     data, addr = sock.recvfrom(1024)
+                    print(f"Received response from {addr}: {data[:50]}")
                     response = json.loads(data.decode())
                     if response.get("type") == ANNOUNCE_MESSAGE:
                         ip = response["ip"]
@@ -109,12 +131,14 @@ class ServerDiscovery:
                                 "port": response["port"],
                                 "name": response["name"]
                             })
+                            print(f"Found server: {response['name']} at {ip}")
                 except socket.timeout:
                     # タイムアウトでも継続して待機
                     continue
                 except json.JSONDecodeError:
                     continue
-                except Exception:
+                except Exception as e:
+                    print(f"Discovery error: {e}")
                     continue
         finally:
             sock.close()
