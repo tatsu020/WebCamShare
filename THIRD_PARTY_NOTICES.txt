@@ -1,0 +1,67 @@
+THIRD-PARTY LICENSE NOTICES
+===========================
+
+This product bundles third-party components. Full license texts are in the LICENSES folder.
+
+certifi (2025.11.12) - Mozilla Public License 2.0 (MPL 2.0)
+  Files:
+    - LICENSES/certifi-LICENSE
+
+charset-normalizer (3.4.4) - MIT
+  Files:
+    - LICENSES/charset-normalizer-LICENSE
+
+comtypes (1.4.13) - MIT License
+  Files:
+    - LICENSES/comtypes-LICENSE.txt
+
+customtkinter (5.2.2) - MIT License
+  Files:
+    - LICENSES/customtkinter-LICENSE
+
+darkdetect (0.8.0) - BSD License
+  Files:
+    - LICENSES/darkdetect-LICENSE
+
+idna (3.11) - BSD-3-Clause
+  Files:
+    - LICENSES/idna-LICENSE.md
+
+numpy (2.3.5) - BSD License
+  Files:
+    - LICENSES/numpy-LICENSE.txt
+
+opencv-python (4.11.0.86) - Apache Software License
+  Files:
+    - LICENSES/opencv-python-LICENSE-3RD-PARTY.txt
+    - LICENSES/opencv-python-LICENSE.txt
+
+packaging (25.0) - Apache Software License; BSD License
+  Files:
+    - LICENSES/packaging-LICENSE
+    - LICENSES/packaging-LICENSE.APACHE
+    - LICENSES/packaging-LICENSE.BSD
+
+pillow (12.0.0) - MIT-CMU
+  Files:
+    - LICENSES/pillow-LICENSE
+
+pygrabber (0.2) - MIT
+  Files:
+    - LICENSES/pygrabber-LICENSE
+
+pyvirtualcam (0.14.0) - GNU General Public License v2 (GPLv2)
+  Files:
+    - LICENSES/pyvirtualcam-LICENSE
+
+pywin32 (311) - Python Software Foundation License
+  Files:
+    - LICENSES/pywin32-PSF-LICENSE-Python.txt
+
+requests (2.32.5) - Apache Software License
+  Files:
+    - LICENSES/requests-LICENSE
+
+urllib3 (2.5.0) - MIT
+  Files:
+    - LICENSES/urllib3-LICENSE.txt
