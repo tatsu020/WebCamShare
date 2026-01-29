@@ -23,6 +23,9 @@ class ReceiverApp(ctk.CTkFrame):
         self.discovered_servers = []
         self._pending_frame = False
         self._canvas_size = (640, 360)
+        self._connecting = False
+        self._cancel_connect = False
+        self.preview_enabled = True
 
         self.setup_ui()
 
@@ -165,7 +168,34 @@ class ReceiverApp(ctk.CTkFrame):
             bg=Theme.BG_PREVIEW, 
             highlightthickness=0
         )
-        self.preview_canvas.pack(fill="both", expand=True, padx=Theme.PAD_SM, pady=Theme.PAD_SM)
+        self.preview_canvas.pack(fill="both", expand=True, padx=Theme.PAD_SM, pady=(0, Theme.PAD_SM))
+        
+        # Preview header with toggle button
+        self.frame_preview_header = ctk.CTkFrame(self.frame_preview, fg_color="transparent")
+        self.frame_preview_header.pack(fill="x", padx=Theme.PAD_SM, pady=(Theme.PAD_SM, 0))
+        
+        self.label_preview_title = ctk.CTkLabel(
+            self.frame_preview_header,
+            text="Stream Preview",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        self.label_preview_title.pack(side="left", padx=Theme.PAD_XS)
+        
+        self.btn_preview_toggle = ctk.CTkButton(
+            self.frame_preview_header,
+            text="👁",
+            width=28,
+            height=28,
+            font=(Theme.FONT_FAMILY, 14),
+            fg_color="transparent",
+            hover_color=Theme.BG_INPUT,
+            text_color=Theme.ACCENT,
+            corner_radius=Theme.RADIUS_SM,
+            command=self.toggle_preview
+        )
+        self.btn_preview_toggle.pack(side="right", padx=Theme.PAD_XS)
+
         self.preview_text = self.preview_canvas.create_text(
             0, 0, 
             text="Stream Preview", 
@@ -182,7 +212,7 @@ class ReceiverApp(ctk.CTkFrame):
         self._canvas_size = (event.width, event.height)
 
     def toggle_connection(self):
-        if not self.is_running:
+        if not self.is_running and not self._connecting:
             self.start_receiving()
         else:
             self.stop_receiving()
@@ -253,33 +283,83 @@ class ReceiverApp(ctk.CTkFrame):
                 break
 
     def start_receiving(self):
+        if self._connecting or self.is_running:
+            return
+        self._connecting = True
+        self._cancel_connect = False
+
         ip = self.entry_ip.get()
         url = f"http://{ip}:8000/stream.mjpg"
+
+        self.btn_connect.configure(text="⏳  Connecting...", state="disabled")
+        self.label_status.configure(text="● Connecting...", text_color=Theme.STATUS_WARNING)
         
-        try:
-            self.client = StreamClient(url)
-            self.client.start()
+        def worker():
+            client = None
+            vcam = None
+            try:
+                client = StreamClient(url)
+                client.start()
+                
+                # Initialize Virtual Camera (Standard HD resolution)
+                vcam = VirtualCamera(width=1280, height=720)
+                vcam.start()
+            except Exception as e:
+                if client:
+                    client.stop()
+                if vcam:
+                    vcam.stop()
+                self.master.after(0, lambda: self._on_connect_failed(e))
+                return
             
-            # Initialize Virtual Camera (Standard HD resolution)
-            self.virtual_cam = VirtualCamera(width=1280, height=720)
-            self.virtual_cam.start()
+            self.master.after(0, lambda: self._on_connect_success(client, vcam))
 
-            self.is_running = True
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_connect_success(self, client, vcam):
+        if self._cancel_connect:
+            client.stop()
+            vcam.stop()
+            self._connecting = False
+            self._cancel_connect = False
             self.btn_connect.configure(
-                text="■  Disconnect", 
-                fg_color=Theme.ACCENT_DANGER,
-                hover_color=Theme.ACCENT_DANGER_HOVER
+                text="▶  Connect",
+                fg_color=Theme.ACCENT,
+                hover_color=Theme.ACCENT_HOVER,
+                state="normal"
             )
-            self.label_status.configure(text="● Connected — Streaming", text_color=Theme.STATUS_SUCCESS)
-            
-            self.thread = threading.Thread(target=self.process_stream, daemon=True)
-            self.thread.start()
+            self.label_status.configure(text="● Disconnected", text_color=Theme.STATUS_IDLE)
+            return
 
-        except Exception as e:
-            self.label_status.configure(text=f"● Error: {e}", text_color=Theme.STATUS_ERROR)
-            self.stop_receiving()
+        self.client = client
+        self.virtual_cam = vcam
+        self.is_running = True
+        self._connecting = False
+        self.btn_connect.configure(
+            text="■  Disconnect", 
+            fg_color=Theme.ACCENT_DANGER,
+            hover_color=Theme.ACCENT_DANGER_HOVER,
+            state="normal"
+        )
+        self.label_status.configure(text="● Connected — Streaming", text_color=Theme.STATUS_SUCCESS)
+        
+        self.thread = threading.Thread(target=self.process_stream, daemon=True)
+        self.thread.start()
+
+    def _on_connect_failed(self, error):
+        self._connecting = False
+        self._cancel_connect = False
+        self.label_status.configure(text=f"● Error: {error}", text_color=Theme.STATUS_ERROR)
+        self.btn_connect.configure(
+            text="▶  Connect", 
+            fg_color=Theme.ACCENT,
+            hover_color=Theme.ACCENT_HOVER,
+            state="normal"
+        )
 
     def stop_receiving(self):
+        if self._connecting:
+            self._cancel_connect = True
         self.is_running = False
         if self.client:
             self.client.stop()
@@ -292,7 +372,8 @@ class ReceiverApp(ctk.CTkFrame):
         self.btn_connect.configure(
             text="▶  Connect", 
             fg_color=Theme.ACCENT,
-            hover_color=Theme.ACCENT_HOVER
+            hover_color=Theme.ACCENT_HOVER,
+            state="normal"
         )
         self.label_status.configure(text="● Disconnected", text_color=Theme.STATUS_IDLE)
         
@@ -313,6 +394,16 @@ class ReceiverApp(ctk.CTkFrame):
 
             # Skip frame if previous frame is still being processed
             if self._pending_frame:
+                continue
+
+            # プレビュー無効時または最小化時はプレビュー処理をスキップ
+            if not self.preview_enabled or self._is_minimized():
+                if not self.preview_enabled:
+                    self.master.after(0, lambda: self._show_preview_message("Preview Disabled"))
+                else:
+                    self.master.after(0, lambda: self._show_preview_message("Minimized (Preview Paused)"))
+                import time
+                time.sleep(0.1)
                 continue
             
             # Process image in background thread for performance
@@ -359,6 +450,27 @@ class ReceiverApp(ctk.CTkFrame):
             print(f"Preview error: {e}")
         finally:
             self._pending_frame = False
+
+    def toggle_preview(self):
+        """プレビューの有効/無効を切り替え"""
+        self.preview_enabled = not self.preview_enabled
+        if self.preview_enabled:
+            self.btn_preview_toggle.configure(text="👁", text_color=Theme.ACCENT)
+        else:
+            self.btn_preview_toggle.configure(text="�", text_color=Theme.TEXT_SECONDARY)
+            self._show_preview_message("Preview Disabled")
+    
+    def _is_minimized(self):
+        """ウィンドウが最小化されているか確認"""
+        try:
+            return self.master.state() == "iconic"
+        except Exception:
+            return False
+
+    def _show_preview_message(self, message):
+        """プレビューにメッセージを表示"""
+        self.preview_canvas.delete("preview")
+        self.preview_canvas.itemconfig(self.preview_text, text=message)
 
     def _on_back(self):
         """Handle back button click"""

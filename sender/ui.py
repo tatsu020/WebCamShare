@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import cv2
+import threading
 from PIL import Image, ImageTk
 from .camera import Camera, get_available_cameras
 from .server import StreamServer
@@ -20,6 +21,10 @@ class SenderApp(ctk.CTkFrame):
         self.camera_list = []
         self.photo_image = None
         self.preview_update_id = None
+        self._refreshing = False
+        self._starting = False
+        self._stopping = False
+        self.preview_enabled = True
 
         self.setup_ui()
         self.refresh_camera_list()
@@ -154,7 +159,34 @@ class SenderApp(ctk.CTkFrame):
             bg=Theme.BG_PREVIEW, 
             highlightthickness=0
         )
-        self.preview_canvas.pack(fill="both", expand=True, padx=Theme.PAD_SM, pady=Theme.PAD_SM)
+        self.preview_canvas.pack(fill="both", expand=True, padx=Theme.PAD_SM, pady=(0, Theme.PAD_SM))
+        
+        # Preview header with toggle button
+        self.frame_preview_header = ctk.CTkFrame(self.frame_preview, fg_color="transparent")
+        self.frame_preview_header.pack(fill="x", padx=Theme.PAD_SM, pady=(Theme.PAD_SM, 0))
+        
+        self.label_preview_title = ctk.CTkLabel(
+            self.frame_preview_header,
+            text="Camera Preview",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        self.label_preview_title.pack(side="left", padx=Theme.PAD_XS)
+        
+        self.btn_preview_toggle = ctk.CTkButton(
+            self.frame_preview_header,
+            text="👁",
+            width=28,
+            height=28,
+            font=(Theme.FONT_FAMILY, 14),
+            fg_color="transparent",
+            hover_color=Theme.BG_INPUT,
+            text_color=Theme.ACCENT,
+            corner_radius=Theme.RADIUS_SM,
+            command=self.toggle_preview
+        )
+        self.btn_preview_toggle.pack(side="right", padx=Theme.PAD_XS)
+
         self.preview_text = self.preview_canvas.create_text(
             0, 0, 
             text="Camera Preview", 
@@ -171,15 +203,31 @@ class SenderApp(ctk.CTkFrame):
 
     def refresh_camera_list(self):
         """カメラ一覧を更新"""
-        self.camera_list = get_available_cameras()
+        if self._refreshing or self.is_running or self._starting:
+            return
+        self._refreshing = True
+        self.btn_refresh.configure(state="disabled")
+
+        def worker():
+            cameras = get_available_cameras()
+            self.master.after(0, lambda: self._apply_camera_list(cameras))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_camera_list(self, cameras):
+        self._refreshing = False
+        self.camera_list = cameras
         camera_names = [cam['name'] for cam in self.camera_list]
-        
+
         if camera_names:
             self.combo_camera.configure(values=camera_names)
             self.camera_var.set(camera_names[0])
         else:
             self.combo_camera.configure(values=["カメラが見つかりません"])
             self.camera_var.set("カメラが見つかりません")
+
+        if not self.is_running and not self._starting:
+            self.btn_refresh.configure(state="normal")
 
     def get_selected_camera_id(self):
         """選択されたカメラのIDを取得"""
@@ -196,57 +244,133 @@ class SenderApp(ctk.CTkFrame):
             self.stop_streaming()
 
     def start_streaming(self):
-        try:
-            cam_id = self.get_selected_camera_id()
-            self.camera = Camera(camera_id=cam_id)
-            self.camera.start()
+        if self._starting or self.is_running:
+            return
+        self._starting = True
+        self.btn_toggle.configure(text="⏳  Starting...", state="disabled")
+        self.combo_camera.configure(state="disabled")
+        self.btn_refresh.configure(state="disabled")
 
-            self.server = StreamServer(self.camera)
-            self.server.start()
+        cam_id = self.get_selected_camera_id()
 
-            self.is_running = True
-            self.btn_toggle.configure(
-                text="■  Stop Streaming", 
-                fg_color=Theme.ACCENT_DANGER,
-                hover_color=Theme.ACCENT_DANGER_HOVER
-            )
-            self.combo_camera.configure(state="disabled")
-            self.btn_refresh.configure(state="disabled")
-            self.update_preview()
-        except Exception as e:
-            print(f"Error starting stream: {e}")
+        def worker():
+            try:
+                camera = Camera(camera_id=cam_id)
+                camera.start()
+
+                server = StreamServer(camera)
+                server.start()
+            except Exception as e:
+                self.master.after(0, lambda: self._on_start_failed(e))
+                return
+
+            self.master.after(0, lambda: self._on_start_success(camera, server))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_start_success(self, camera, server):
+        self.camera = camera
+        self.server = server
+        self.is_running = True
+        self._starting = False
+        self.btn_toggle.configure(
+            text="■  Stop Streaming",
+            fg_color=Theme.ACCENT_DANGER,
+            hover_color=Theme.ACCENT_DANGER_HOVER,
+            state="normal"
+        )
+        self.combo_camera.configure(state="disabled")
+        self.btn_refresh.configure(state="disabled")
+        self.update_preview()
+
+    def _on_start_failed(self, error):
+        self._starting = False
+        self.is_running = False
+        self.btn_toggle.configure(
+            text="▶  Start Streaming",
+            fg_color=Theme.ACCENT,
+            hover_color=Theme.ACCENT_HOVER,
+            state="normal"
+        )
+        self.combo_camera.configure(state="readonly")
+        self.btn_refresh.configure(state="normal")
+        print(f"Error starting stream: {error}")
 
     def stop_streaming(self):
+        if self._stopping:
+            return
         self.is_running = False
+        self._stopping = True
         
         if self.preview_update_id:
             self.after_cancel(self.preview_update_id)
             self.preview_update_id = None
-        
-        if self.server:
-            self.server.stop()
-            self.server = None
-        if self.camera:
-            self.camera.stop()
-            self.camera = None
-        
+
         self.photo_image = None
         self.btn_toggle.configure(
             text="▶  Start Streaming", 
             fg_color=Theme.ACCENT,
-            hover_color=Theme.ACCENT_HOVER
+            hover_color=Theme.ACCENT_HOVER,
+            state="disabled"
         )
-        self.combo_camera.configure(state="readonly")
-        self.btn_refresh.configure(state="normal")
         
         self.preview_canvas.delete("preview")
         self.preview_canvas.itemconfig(self.preview_text, text="Camera Preview")
+
+        def worker():
+            if self.server:
+                self.server.stop()
+                self.server = None
+            if self.camera:
+                self.camera.stop()
+                self.camera = None
+            self.master.after(0, self._on_stop_complete)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_stop_complete(self):
+        self._stopping = False
+        if not self.is_running and not self._starting:
+            self.btn_toggle.configure(state="normal")
+            self.combo_camera.configure(state="readonly")
+            if not self._refreshing:
+                self.btn_refresh.configure(state="normal")
+
+    def toggle_preview(self):
+        """プレビューの有効/無効を切り替え"""
+        self.preview_enabled = not self.preview_enabled
+        if self.preview_enabled:
+            self.btn_preview_toggle.configure(text="👁", text_color=Theme.ACCENT)
+        else:
+            self.btn_preview_toggle.configure(text="👁", text_color=Theme.TEXT_SECONDARY)
+            self.preview_canvas.delete("preview")
+            self.preview_canvas.itemconfig(self.preview_text, text="Preview Disabled")
+    
+    def _is_minimized(self):
+        """ウィンドウが最小化されているか確認"""
+        try:
+            return self.master.state() == "iconic"
+        except Exception:
+            return False
 
     def update_preview(self):
         if not self.is_running or not self.camera:
             return
         
-        frame = self.camera.get_frame()
+        # プレビュー無効時または最小化時は更新をスキップ
+        if not self.preview_enabled or self._is_minimized():
+            if not self.preview_enabled:
+                self.preview_canvas.delete("preview")
+                self.preview_canvas.itemconfig(self.preview_text, text="Preview Disabled")
+            else:
+                # 最小化中
+                self.preview_canvas.delete("preview")
+                self.preview_canvas.itemconfig(self.preview_text, text="Minimized (Preview Paused)")
+            
+            self.preview_update_id = self.after(100, self.update_preview)
+            return
+
+        frame = self.camera.get_frame_view()
         if frame is not None:
             try:
                 # Resize for preview (keep aspect ratio) using cv2 for performance

@@ -1,16 +1,51 @@
 import customtkinter as ctk
+import sys
+from pathlib import Path
+import ctypes
+import tkinter as tk
 from sender.ui import SenderApp
 from receiver.ui import ReceiverApp
 from utils.theme import Theme
 
 ctk.set_appearance_mode("Dark")
 
+APP_USER_MODEL_ID = "tatsu020.WebCamShare"
+
+def set_windows_app_user_model_id(app_id: str) -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception:
+        pass
+
+def find_resource(filename: str) -> Path | None:
+    nuitka_dir = None
+    try:
+        import __compiled__  # type: ignore
+        nuitka_dir = Path(getattr(__compiled__, "containing_dir", ""))
+    except Exception:
+        nuitka_dir = None
+
+    candidates = [
+        nuitka_dir / filename if nuitka_dir else None,
+        Path(getattr(sys, "_MEIPASS", "")) / filename,
+        Path(__file__).resolve().parent / filename,
+        Path(sys.argv[0]).resolve().parent / filename,
+        Path.cwd() / filename,
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate
+    return None
+
 class MainApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("WebCam Share")
-        self.geometry("800x600")
+        self.geometry("800x680")
         self.configure(fg_color=Theme.BG_DARK)
+        self.after(0, self.apply_app_icon)
 
         # Main container with centered content
         self.frame_menu = ctk.CTkFrame(
@@ -77,6 +112,29 @@ class MainApp(ctk.CTk):
         )
         self.btn_receiver.pack(pady=Theme.PAD_SM)
 
+    def apply_app_icon(self):
+        """Ensure window and taskbar icons use the app icon on Windows."""
+        icon_ico = find_resource("icon.ico")
+        icon_png = find_resource("icon.png")
+        if sys.platform == "win32" and icon_ico:
+            try:
+                self.iconbitmap(str(icon_ico))
+                self.iconbitmap(default=str(icon_ico))
+            except Exception:
+                pass
+        if icon_png:
+            try:
+                self._app_icon_image = tk.PhotoImage(file=str(icon_png))
+                self.iconphoto(True, self._app_icon_image)
+            except Exception:
+                try:
+                    from PIL import Image, ImageTk
+                    image = Image.open(icon_png)
+                    self._app_icon_image = ImageTk.PhotoImage(image)
+                    self.iconphoto(True, self._app_icon_image)
+                except Exception:
+                    pass
+
     def start_sender(self):
         self.frame_menu.pack_forget()
         self.sender_app = SenderApp(self, on_back=self.show_menu)
@@ -103,5 +161,6 @@ class MainApp(ctk.CTk):
         self.frame_menu.pack(pady=Theme.PAD_XL, padx=Theme.PAD_XL, fill="both", expand=True)
 
 if __name__ == "__main__":
+    set_windows_app_user_model_id(APP_USER_MODEL_ID)
     app = MainApp()
     app.mainloop()

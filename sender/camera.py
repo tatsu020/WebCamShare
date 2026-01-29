@@ -1,56 +1,64 @@
-import cv2
-import threading
-import time
 import os
 import sys
 
+# OpenCVの不要なログを抑制 (cv2をインポートする前に設定する必要がある)
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["OPENCV_VIDEOIO_PRIORITY_LIST"] = "DSHOW,MSMF"
+os.environ["OPENCV_VIDEOIO_OBSENSOR_BACKEND_PRIORITY"] = "0"
+
+import cv2
+import threading
+import time
+import pythoncom
+
 def get_camera_names():
-    """Windowsでカメラのデバイス名を取得する"""
+    """DirectShowのインデックス順にカメラ名を取得する"""
+    devices = []
+    
+    # 1. pygrabber (DirectShow Graph) を使用
+    # これが OpenCV (CAP_DSHOW) のインデックスと最も一致する
     try:
-        # Nuitkaビルド時にpygrabberがCOM初期化に失敗することがある
         import pythoncom
         pythoncom.CoInitialize()
-    except Exception:
-        pass
-    
-    try:
         from pygrabber.dshow_graph import FilterGraph
         graph = FilterGraph()
         devices = graph.get_input_devices()
-        return devices if devices else []
+        if devices:
+            return devices
     except Exception:
-        return []
+        pass
 
-def get_available_cameras(max_cameras=5):
-    """利用可能なカメラの一覧を取得する"""
-    cameras = []
-    
-    # OpenCVのエラー出力を一時的に抑制
-    os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
-    
-    # Windowsのデバイス名を取得
+    # 2. フォールバック: PowerShell
+    try:
+        import subprocess
+        import json
+        cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-PnpDevice -Class Camera,Image,Video -Status OK | Select-Object -ExpandProperty FriendlyName | ConvertTo-Json"'
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            raw_data = json.loads(result.stdout)
+            if isinstance(raw_data, list):
+                return raw_data
+            elif isinstance(raw_data, str):
+                return [raw_data]
+    except Exception:
+        pass
+            
+    return []
+
+def get_available_cameras():
+    """利用可能なカメラの一覧を取得する（高速版）"""
+    # DirectShowバックエンドでのデバイス名リストを取得
+    # 一台ずつVideoCaptureを開くと非常に遅く、LEDが点滅するため、
+    # システムのデバイス一覧をそのまま信頼する。
     device_names = get_camera_names()
-    
-    for i in range(max_cameras):
-        # DirectShowバックエンドを使用（Windowsで安定）
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-        if cap.isOpened():
-            # フレームが実際に取得できるか確認
-            ret, _ = cap.read()
-            if ret:
-                # デバイス名があれば使用、なければ番号
-                if i < len(device_names):
-                    name = device_names[i]
-                else:
-                    name = f"Camera {i}"
-                cameras.append({
-                    'id': i,
-                    'name': name
-                })
-            cap.release()
-        else:
-            cap.release()
-    
+
+    cameras = []
+    for i, name in enumerate(device_names):
+        cameras.append({
+            'id': i,
+            'name': name
+        })
+
     return cameras
 
 class Camera:
@@ -64,15 +72,27 @@ class Camera:
         self.current_frame = None
         self.lock = threading.Lock()
 
+        # Zero-Copy設計: JPEG圧縮済みバッファ
+        self._jpeg_buffer = None
+        self._jpeg_lock = threading.Lock()
+        self._encode_params = [cv2.IMWRITE_JPEG_QUALITY, 85]
+
     def start(self):
         if self.running:
             return
-        
-        # DirectShowバックエンドを使用（Windowsで安定）
+
+        # DirectShowを使用（名前のインデックスと一致させるため）
         self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         
+        if self.cap.isOpened():
+            # バッファサイズを最小にして遅延を抑制
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # デバイス側のデフォルト解像度を取得して保持（アプリ側から変更しない）
+            self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"Camera opened at: {self.width}x{self.height}")
+
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera_id}")
 
@@ -91,21 +111,33 @@ class Camera:
         while self.running:
             ret, frame = self.cap.read()
             if ret:
+                # JPEG圧縮をカメラスレッドで事前実行（メインスレッドの負荷軽減）
+                ret_enc, jpeg = cv2.imencode('.jpg', frame, self._encode_params)
+                if ret_enc:
+                    with self._jpeg_lock:
+                        self._jpeg_buffer = jpeg.tobytes()
                 with self.lock:
                     self.current_frame = frame
             else:
                 time.sleep(0.1)
 
     def get_frame(self):
+        """フレームのコピーを返す（外部で変更する場合用）"""
         with self.lock:
             if self.current_frame is not None:
                 return self.current_frame.copy()
             return None
 
+    def get_frame_view(self):
+        """プレビュー用（コピーなし参照、読み取り専用）"""
+        with self.lock:
+            return self.current_frame
+
     def get_jpeg_frame(self):
-        frame = self.get_frame()
-        if frame is not None:
-            ret, jpeg = cv2.imencode('.jpg', frame)
-            if ret:
-                return jpeg.tobytes()
-        return None
+        """互換性維持用（非推奨）"""
+        return self.get_jpeg_frame_direct()
+
+    def get_jpeg_frame_direct(self):
+        """圧縮済みJPEGバッファを直接返す（Zero-Copy）"""
+        with self._jpeg_lock:
+            return self._jpeg_buffer
