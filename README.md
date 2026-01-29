@@ -6,7 +6,7 @@
 
 👉 **[最新版をダウンロード](https://github.com/tatsu020/WebCamShare/releases/latest)**
 
-Windows用のexeファイルをダウンロードして、そのまま実行できます。
+ダウンロードしたzipファイルを解凍し、WebCamShare.exeファイルを実行してください。
 
 > ⚠️ **受信側（Receiver）の準備**  
 > [OBS Studio](https://obsproject.com/) をインストールしてください（仮想カメラドライバが自動で登録されます）。
