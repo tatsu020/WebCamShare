@@ -54,6 +54,10 @@ pyvirtualcam (0.14.0) - GNU General Public License v2 (GPLv2)
   Files:
     - LICENSES/pyvirtualcam-LICENSE
 
+softcam (upstream: tshino/softcam) - MIT License
+  Files:
+    - LICENSES/softcam-LICENSE
+
 pywin32 (311) - Python Software Foundation License
   Files:
     - LICENSES/pywin32-PSF-LICENSE-Python.txt

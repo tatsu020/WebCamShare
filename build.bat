@@ -47,7 +47,6 @@ echo.
 
 uv run python -m nuitka ^
     --standalone ^
-    --onefile ^
     --windows-console-mode=disable ^
     %ICON_OPT% ^
     --enable-plugin=tk-inter ^
@@ -103,16 +102,32 @@ if errorlevel 1 (
 
 echo.
 echo Copying license files...
-if exist "dist\\icon.ico" del /F /Q "dist\\icon.ico" >nul
-if exist "dist\\icon.png" del /F /Q "dist\\icon.png" >nul
-if exist "LICENSE" copy /Y "LICENSE" "dist\\LICENSE" >nul
-if exist "README.md" copy /Y "README.md" "dist\\README.md" >nul
-if exist "THIRD_PARTY_NOTICES.txt" copy /Y "THIRD_PARTY_NOTICES.txt" "dist\\THIRD_PARTY_NOTICES.txt" >nul
-if exist "LICENSES" xcopy /E /I /Y "LICENSES" "dist\\LICENSES" >nul
+if exist "dist\main.dist" (
+    echo Moving files to WebCamShare folder...
+    if exist "dist\WebCamShare" rmdir /S /Q "dist\WebCamShare" >nul 2>&1
+    
+    REM Use xcopy to move the contents out, avoiding permission errors on the main root folder.
+    xcopy /E /I /H /Y /C "dist\main.dist\*" "dist\WebCamShare\" >nul 2>&1
+    
+    if exist "dist\WebCamShare\icon.ico" del /F /Q "dist\WebCamShare\icon.ico" >nul 2>&1
+    if exist "dist\WebCamShare\icon.png" del /F /Q "dist\WebCamShare\icon.png" >nul 2>&1
+    if exist "LICENSE" copy /Y "LICENSE" "dist\WebCamShare\LICENSE" >nul 2>&1
+    if exist "README.md" copy /Y "README.md" "dist\WebCamShare\README.md" >nul 2>&1
+    if exist "THIRD_PARTY_NOTICES.txt" copy /Y "THIRD_PARTY_NOTICES.txt" "dist\WebCamShare\THIRD_PARTY_NOTICES.txt" >nul 2>&1
+    if exist "LICENSES" xcopy /E /I /Y "LICENSES" "dist\WebCamShare\LICENSES" >nul 2>&1
+
+    if exist "softcam\x64\Release\softcam.dll" (
+        echo Copying custom camera driver from built directory...
+        copy /Y "softcam\x64\Release\softcam.dll" "dist\WebCamShare\webcamshare_camera.dll" >nul
+    ) else if exist "receiver\webcamshare_camera.dll" (
+        echo Copying custom camera driver from receiver directory...
+        copy /Y "receiver\webcamshare_camera.dll" "dist\WebCamShare\webcamshare_camera.dll" >nul
+    )
+)
 
 echo.
 echo ========================================
 echo Build completed successfully!
-echo Output: dist\WebCamShare.exe
+echo Output: dist\WebCamShare
 echo ========================================
 pause

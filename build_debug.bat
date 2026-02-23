@@ -30,7 +30,6 @@ if defined ICON_PATH (
 
 uv run python -m nuitka ^
     --standalone ^
-    --onefile ^
     %ICON_OPT% ^
     --enable-plugin=tk-inter ^
     --include-data-file=icon.ico=icon.ico ^
@@ -58,13 +57,27 @@ if errorlevel 1 (
 
 echo.
 echo Copying license files...
-if exist "dist\\icon.ico" del /F /Q "dist\\icon.ico" >nul
-if exist "dist\\icon.png" del /F /Q "dist\\icon.png" >nul
-if exist "LICENSE" copy /Y "LICENSE" "dist\\LICENSE" >nul
-if exist "README.md" copy /Y "README.md" "dist\\README.md" >nul
-if exist "THIRD_PARTY_NOTICES.txt" copy /Y "THIRD_PARTY_NOTICES.txt" "dist\\THIRD_PARTY_NOTICES.txt" >nul
-if exist "LICENSES" xcopy /E /I /Y "LICENSES" "dist\\LICENSES" >nul
+if exist "dist\main.dist" (
+    echo Renaming main.dist to WebCamShare_debug...
+    if exist "dist\WebCamShare_debug" rmdir /S /Q "dist\WebCamShare_debug" >nul
+    rename "dist\main.dist" "WebCamShare_debug"
+    
+    if exist "dist\WebCamShare_debug\icon.ico" del /F /Q "dist\WebCamShare_debug\icon.ico" >nul
+    if exist "dist\WebCamShare_debug\icon.png" del /F /Q "dist\WebCamShare_debug\icon.png" >nul
+    if exist "LICENSE" copy /Y "LICENSE" "dist\WebCamShare_debug\LICENSE" >nul
+    if exist "README.md" copy /Y "README.md" "dist\WebCamShare_debug\README.md" >nul
+    if exist "THIRD_PARTY_NOTICES.txt" copy /Y "THIRD_PARTY_NOTICES.txt" "dist\WebCamShare_debug\THIRD_PARTY_NOTICES.txt" >nul
+    if exist "LICENSES" xcopy /E /I /Y "LICENSES" "dist\WebCamShare_debug\LICENSES" >nul
+
+    if exist "softcam\x64\Release\softcam.dll" (
+        echo Copying custom camera driver from built directory...
+        copy /Y "softcam\x64\Release\softcam.dll" "dist\WebCamShare_debug\webcamshare_camera.dll" >nul
+    ) else if exist "receiver\webcamshare_camera.dll" (
+        echo Copying custom camera driver from receiver directory...
+        copy /Y "receiver\webcamshare_camera.dll" "dist\WebCamShare_debug\webcamshare_camera.dll" >nul
+    )
+)
 
 echo.
-echo Build completed! Output: dist\WebCamShare_debug.exe
+echo Build completed! Output: dist\WebCamShare_debug
 pause

@@ -141,6 +141,29 @@ class ReceiverApp(ctk.CTkFrame):
         )
         self.btn_connect.pack(side="right", padx=Theme.PAD_XS)
 
+        # Driver controls
+        self.frame_driver = ctk.CTkFrame(self.frame_controls, fg_color="transparent")
+        self.frame_driver.pack(fill="x", padx=Theme.PAD_MD, pady=(0, Theme.PAD_MD))
+        
+        self.label_driver = ctk.CTkLabel(
+            self.frame_driver, text="Custom Driver:", font=Theme.FONT_SMALL, text_color=Theme.TEXT_SECONDARY
+        )
+        self.label_driver.pack(side="left", padx=(0, Theme.PAD_SM))
+
+        self.btn_reg_driver = ctk.CTkButton(
+            self.frame_driver, text="Install", command=self.register_driver,
+            width=80, height=28, font=Theme.FONT_SMALL,
+            fg_color=Theme.BG_INPUT, hover_color="#3a3a46", border_width=1, border_color=Theme.ACCENT
+        )
+        self.btn_reg_driver.pack(side="left", padx=(0, Theme.PAD_XS))
+
+        self.btn_unreg_driver = ctk.CTkButton(
+            self.frame_driver, text="Uninstall", command=self.unregister_driver,
+            width=80, height=28, font=Theme.FONT_SMALL,
+            fg_color=Theme.BG_INPUT, hover_color="#3a3a46", border_width=1, border_color=Theme.ACCENT_DANGER
+        )
+        self.btn_unreg_driver.pack(side="left")
+
         # Status indicator
         self.frame_status = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_status.pack(fill="x", padx=Theme.PAD_LG, pady=Theme.PAD_XS)
@@ -210,6 +233,22 @@ class ReceiverApp(ctk.CTkFrame):
         """Canvasサイズ変更時にテキストを中央に移動"""
         self.preview_canvas.coords(self.preview_text, event.width // 2, event.height // 2)
         self._canvas_size = (event.width, event.height)
+
+    def register_driver(self):
+        from .virtual_cam import register_custom_camera
+        ok, _code, message = register_custom_camera()
+        if ok:
+            self.label_status.configure(text=f"● {message}", text_color=Theme.STATUS_SUCCESS)
+        else:
+            self.label_status.configure(text=f"● Install failed: {message}", text_color=Theme.STATUS_ERROR)
+
+    def unregister_driver(self):
+        from .virtual_cam import unregister_custom_camera
+        ok, _code, message = unregister_custom_camera()
+        if ok:
+            self.label_status.configure(text=f"● {message}", text_color=Theme.STATUS_SUCCESS)
+        else:
+            self.label_status.configure(text=f"● Uninstall failed: {message}", text_color=Theme.STATUS_ERROR)
 
     def toggle_connection(self):
         if not self.is_running and not self._connecting:
