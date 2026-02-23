@@ -12,6 +12,7 @@ dependencies = [
     "customtkinter",
     "pillow",
     "pygrabber>=0.2",
+    "comtypes",
     "pywin32",
 ]
 
