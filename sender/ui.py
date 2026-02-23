@@ -229,13 +229,13 @@ class SenderApp(ctk.CTkFrame):
         if not self.is_running and not self._starting:
             self.btn_refresh.configure(state="normal")
 
-    def get_selected_camera_id(self):
-        """選択されたカメラのIDを取得"""
+    def get_selected_camera_key(self):
+        """選択されたカメラの内部キーを取得"""
         selected = self.camera_var.get()
         for cam in self.camera_list:
             if cam['name'] == selected:
                 return cam['id']
-        return 0
+        return self.camera_list[0]['id'] if self.camera_list else 0
 
     def toggle_streaming(self):
         if not self.is_running:
@@ -251,11 +251,11 @@ class SenderApp(ctk.CTkFrame):
         self.combo_camera.configure(state="disabled")
         self.btn_refresh.configure(state="disabled")
 
-        cam_id = self.get_selected_camera_id()
+        cam_key = self.get_selected_camera_key()
 
         def worker():
             try:
-                camera = Camera(camera_id=cam_id)
+                camera = Camera(descriptor_key=cam_key)
                 camera.start()
 
                 server = StreamServer(camera)
