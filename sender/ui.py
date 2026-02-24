@@ -2,7 +2,7 @@ import customtkinter as ctk
 import cv2
 import threading
 from PIL import Image, ImageTk
-from .camera import Camera, get_available_cameras
+from .camera import Camera, get_available_cameras, get_camera_diagnostics
 from .server import StreamServer
 from utils.network import get_local_ip
 from utils.theme import Theme
@@ -19,6 +19,8 @@ class SenderApp(ctk.CTkFrame):
         self.server = None
         self.is_running = False
         self.camera_list = []
+        self.camera_display_to_id = {}
+        self._last_camera_issue = "No available camera"
         self.photo_image = None
         self.preview_update_id = None
         self._refreshing = False
@@ -37,7 +39,7 @@ class SenderApp(ctk.CTkFrame):
         # Back button
         self.btn_back = ctk.CTkButton(
             self.frame_header,
-            text="←",
+            text="<",
             width=36,
             height=36,
             font=(Theme.FONT_FAMILY, 18),
@@ -50,7 +52,7 @@ class SenderApp(ctk.CTkFrame):
 
         self.label_title = ctk.CTkLabel(
             self.frame_header, 
-            text="📷 Sender Mode", 
+            text="Sender Mode", 
             font=Theme.FONT_HEADING,
             text_color=Theme.TEXT_PRIMARY
         )
@@ -120,7 +122,7 @@ class SenderApp(ctk.CTkFrame):
 
         self.btn_refresh = ctk.CTkButton(
             self.frame_controls_inner, 
-            text="↻", 
+            text="R", 
             width=36,
             height=36,
             font=(Theme.FONT_FAMILY, 16),
@@ -133,7 +135,7 @@ class SenderApp(ctk.CTkFrame):
 
         self.btn_toggle = ctk.CTkButton(
             self.frame_controls_inner, 
-            text="▶  Start Streaming", 
+            text="Start Streaming", 
             height=36,
             width=160,
             font=Theme.FONT_BUTTON,
@@ -175,7 +177,7 @@ class SenderApp(ctk.CTkFrame):
         
         self.btn_preview_toggle = ctk.CTkButton(
             self.frame_preview_header,
-            text="👁",
+            text="Preview",
             width=28,
             height=28,
             font=(Theme.FONT_FAMILY, 14),
@@ -198,44 +200,92 @@ class SenderApp(ctk.CTkFrame):
         self.preview_canvas.bind("<Configure>", self._on_canvas_resize)
     
     def _on_canvas_resize(self, event):
-        """Canvasサイズ変更時にテキストを中央に移動"""
+        """Keep preview placeholder centered when the canvas size changes."""
         self.preview_canvas.coords(self.preview_text, event.width // 2, event.height // 2)
 
     def refresh_camera_list(self):
-        """カメラ一覧を更新"""
+        """Refresh the camera list using current diagnostics."""
         if self._refreshing or self.is_running or self._starting:
             return
         self._refreshing = True
         self.btn_refresh.configure(state="disabled")
 
         def worker():
-            cameras = get_available_cameras()
-            self.master.after(0, lambda: self._apply_camera_list(cameras))
+            cameras = get_available_cameras(force_refresh=True)
+            diagnostics = get_camera_diagnostics(force_refresh=False)
+            self.master.after(0, lambda: self._apply_camera_list(cameras, diagnostics))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _apply_camera_list(self, cameras):
+    def _build_camera_display_entries(self, cameras):
+        display_items = []
+        self.camera_display_to_id = {}
+
+        total_by_name = {}
+        for cam in cameras:
+            name = str(cam.get("name", "")).strip() or "Unnamed Camera"
+            total_by_name[name] = total_by_name.get(name, 0) + 1
+
+        seen_by_name = {}
+        for cam in cameras:
+            name = str(cam.get("name", "")).strip() or "Unnamed Camera"
+            cam_id = str(cam.get("id", ""))
+            seen_by_name[name] = seen_by_name.get(name, 0) + 1
+            ordinal = seen_by_name[name]
+
+            display_name = name if total_by_name[name] == 1 else f"{name} ({ordinal})"
+            display_items.append(display_name)
+            self.camera_display_to_id[display_name] = cam_id
+
+        return display_items
+
+    def _build_no_camera_message(self, diagnostics):
+        if not diagnostics:
+            self._last_camera_issue = "No camera could be opened. Check privacy settings and close other camera apps."
+            return self._last_camera_issue
+
+        reason_counts = {}
+        for item in diagnostics:
+            reason = str(item.get("availability", "unknown"))
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+        total = len(diagnostics)
+        if reason_counts.get("permission_denied", 0) == total:
+            self._last_camera_issue = "Camera access denied by Windows privacy settings."
+        elif reason_counts.get("busy", 0) > 0:
+            self._last_camera_issue = "Camera detected but currently in use by another app."
+        elif reason_counts.get("open_failed", 0) > 0:
+            self._last_camera_issue = "Camera detected but failed to open."
+        else:
+            self._last_camera_issue = "No available camera."
+
+        print(f"Camera diagnostics summary: {reason_counts}")
+        return self._last_camera_issue
+
+    def _apply_camera_list(self, cameras, diagnostics):
         self._refreshing = False
         self.camera_list = cameras
-        camera_names = [cam['name'] for cam in self.camera_list]
+        camera_names = self._build_camera_display_entries(self.camera_list)
 
         if camera_names:
             self.combo_camera.configure(values=camera_names)
             self.camera_var.set(camera_names[0])
+            self._last_camera_issue = ""
         else:
-            self.combo_camera.configure(values=["カメラが見つかりません"])
-            self.camera_var.set("カメラが見つかりません")
+            message = self._build_no_camera_message(diagnostics)
+            self.camera_display_to_id = {}
+            self.combo_camera.configure(values=[message])
+            self.camera_var.set(message)
 
         if not self.is_running and not self._starting:
             self.btn_refresh.configure(state="normal")
 
     def get_selected_camera_key(self):
-        """選択されたカメラの内部キーを取得"""
+        """Return selected camera key."""
         selected = self.camera_var.get()
-        for cam in self.camera_list:
-            if cam['name'] == selected:
-                return cam['id']
-        return self.camera_list[0]['id'] if self.camera_list else 0
+        if selected in self.camera_display_to_id:
+            return self.camera_display_to_id[selected]
+        return self.camera_list[0]['id'] if self.camera_list else None
 
     def toggle_streaming(self):
         if not self.is_running:
@@ -247,11 +297,14 @@ class SenderApp(ctk.CTkFrame):
         if self._starting or self.is_running:
             return
         self._starting = True
-        self.btn_toggle.configure(text="⏳  Starting...", state="disabled")
+        self.btn_toggle.configure(text="Starting...", state="disabled")
         self.combo_camera.configure(state="disabled")
         self.btn_refresh.configure(state="disabled")
 
         cam_key = self.get_selected_camera_key()
+        if not cam_key:
+            self._on_start_failed(RuntimeError(self._last_camera_issue or "No available camera."))
+            return
 
         def worker():
             try:
@@ -274,7 +327,7 @@ class SenderApp(ctk.CTkFrame):
         self.is_running = True
         self._starting = False
         self.btn_toggle.configure(
-            text="■  Stop Streaming",
+            text="Stop Streaming",
             fg_color=Theme.ACCENT_DANGER,
             hover_color=Theme.ACCENT_DANGER_HOVER,
             state="normal"
@@ -287,7 +340,7 @@ class SenderApp(ctk.CTkFrame):
         self._starting = False
         self.is_running = False
         self.btn_toggle.configure(
-            text="▶  Start Streaming",
+            text="Start Streaming",
             fg_color=Theme.ACCENT,
             hover_color=Theme.ACCENT_HOVER,
             state="normal"
@@ -308,7 +361,7 @@ class SenderApp(ctk.CTkFrame):
 
         self.photo_image = None
         self.btn_toggle.configure(
-            text="▶  Start Streaming", 
+            text="Start Streaming", 
             fg_color=Theme.ACCENT,
             hover_color=Theme.ACCENT_HOVER,
             state="disabled"
@@ -337,17 +390,17 @@ class SenderApp(ctk.CTkFrame):
                 self.btn_refresh.configure(state="normal")
 
     def toggle_preview(self):
-        """プレビューの有効/無効を切り替え"""
+        """Toggle preview visibility."""
         self.preview_enabled = not self.preview_enabled
         if self.preview_enabled:
-            self.btn_preview_toggle.configure(text="👁", text_color=Theme.ACCENT)
+            self.btn_preview_toggle.configure(text="Preview", text_color=Theme.ACCENT)
         else:
-            self.btn_preview_toggle.configure(text="👁", text_color=Theme.TEXT_SECONDARY)
+            self.btn_preview_toggle.configure(text="Preview", text_color=Theme.TEXT_SECONDARY)
             self.preview_canvas.delete("preview")
             self.preview_canvas.itemconfig(self.preview_text, text="Preview Disabled")
     
     def _is_minimized(self):
-        """ウィンドウが最小化されているか確認"""
+        """Return True when the window is minimized."""
         try:
             return self.master.state() == "iconic"
         except Exception:
@@ -357,13 +410,13 @@ class SenderApp(ctk.CTkFrame):
         if not self.is_running or not self.camera:
             return
         
-        # プレビュー無効時または最小化時は更新をスキップ
+        # 繝励Ξ繝薙Η繝ｼ辟｡蜉ｹ譎ゅ∪縺溘・譛蟆丞喧譎ゅ・譖ｴ譁ｰ繧偵せ繧ｭ繝・・
         if not self.preview_enabled or self._is_minimized():
             if not self.preview_enabled:
                 self.preview_canvas.delete("preview")
                 self.preview_canvas.itemconfig(self.preview_text, text="Preview Disabled")
             else:
-                # 最小化中
+                # 譛蟆丞喧荳ｭ
                 self.preview_canvas.delete("preview")
                 self.preview_canvas.itemconfig(self.preview_text, text="Minimized (Preview Paused)")
             
@@ -383,18 +436,18 @@ class SenderApp(ctk.CTkFrame):
                 
                 h, w = frame.shape[:2]
                 ratio = min(canvas_width / w, canvas_height / h)
-                preview_width = int(w * ratio)
-                preview_height = int(h * ratio)
+                preview_width = max(1, int(w * ratio))
+                preview_height = max(1, int(h * ratio))
                 frame_resized = cv2.resize(frame, (preview_width, preview_height))
                 
                 # Convert to RGB for Pillow
                 frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
                 image = Image.fromarray(frame_rgb)
 
-                # PhotoImageを保持してガベージコレクションを防ぐ
+                # PhotoImage繧剃ｿ晄戟縺励※繧ｬ繝吶・繧ｸ繧ｳ繝ｬ繧ｯ繧ｷ繝ｧ繝ｳ繧帝亟縺・
                 self.photo_image = ImageTk.PhotoImage(image)
                 
-                # Canvasに描画
+                # Canvas縺ｫ謠冗判
                 self.preview_canvas.delete("preview")
                 self.preview_canvas.itemconfig(self.preview_text, text="")
                 x = canvas_width // 2

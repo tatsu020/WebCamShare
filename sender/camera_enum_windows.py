@@ -60,6 +60,9 @@ class CameraDescriptor:
     moniker_id: str
     candidates: list[OpenCandidate] = field(default_factory=list)
     source_flags: set[str] = field(default_factory=set)
+    availability: str = "unknown"
+    last_error: str | None = None
+    preferred_backend: str = "MSMF"
 
     def add_candidate(self, backend: str, index: int, confidence: int) -> None:
         for candidate in self.candidates:
@@ -309,7 +312,7 @@ def _enumerate_msmf_devices() -> list[_MsmfDevice]:
 
 
 def _sort_candidates(candidates: Iterable[OpenCandidate]) -> list[OpenCandidate]:
-    backend_rank = {"DSHOW": 0, "MSMF": 1}
+    backend_rank = {"MSMF": 0, "DSHOW": 1}
     return sorted(candidates, key=lambda c: (-c.confidence, backend_rank.get(c.backend, 99), c.index))
 
 
@@ -339,6 +342,7 @@ def enumerate_camera_descriptors() -> list[CameraDescriptor]:
             descriptor = CameraDescriptor(key=key, name=name, moniker_id=moniker_id)
             descriptor.source_flags.add("dshow")
             descriptor.add_candidate("DSHOW", index, confidence=120)
+            descriptor.preferred_backend = "DSHOW"
             descriptors.append(descriptor)
             by_name_ordinal[(normalized, ordinal)] = descriptor
 
@@ -366,6 +370,7 @@ def enumerate_camera_descriptors() -> list[CameraDescriptor]:
             has_dshow = "dshow" in descriptor.source_flags
             descriptor.source_flags.add("msmf")
             descriptor.add_candidate("MSMF", index, confidence=105 if has_dshow else 100)
+            descriptor.preferred_backend = "MSMF"
 
     for descriptor in descriptors:
         descriptor.candidates = _sort_candidates(descriptor.candidates)

@@ -1,9 +1,10 @@
 import customtkinter as ctk
 import cv2
 import threading
+import time
 from PIL import Image, ImageTk
 from .client import StreamClient
-from .virtual_cam import VirtualCamera
+from .virtual_cam import VirtualCamera, diagnose_custom_camera_registration
 from utils.network import ServerDiscovery
 from utils.theme import Theme
 import tkinter as tk
@@ -26,8 +27,11 @@ class ReceiverApp(ctk.CTkFrame):
         self._connecting = False
         self._cancel_connect = False
         self.preview_enabled = True
+        self._virtual_cam_retry_sec = 0.5
+        self.driver_status = None
 
         self.setup_ui()
+        self.refresh_driver_status()
 
     def setup_ui(self):
         # Header section
@@ -37,7 +41,7 @@ class ReceiverApp(ctk.CTkFrame):
         # Back button
         self.btn_back = ctk.CTkButton(
             self.frame_header,
-            text="←",
+            text="<",
             width=36,
             height=36,
             font=(Theme.FONT_FAMILY, 18),
@@ -50,7 +54,7 @@ class ReceiverApp(ctk.CTkFrame):
 
         self.label_title = ctk.CTkLabel(
             self.frame_header, 
-            text="🖥️ Receiver Mode", 
+            text="Receiver Mode", 
             font=Theme.FONT_HEADING,
             text_color=Theme.TEXT_PRIMARY
         )
@@ -170,7 +174,7 @@ class ReceiverApp(ctk.CTkFrame):
 
         self.label_status = ctk.CTkLabel(
             self.frame_status, 
-            text="● Disconnected", 
+            text="Disconnected", 
             font=Theme.FONT_SMALL,
             text_color=Theme.STATUS_IDLE
         )
@@ -230,25 +234,53 @@ class ReceiverApp(ctk.CTkFrame):
         self.preview_canvas.bind("<Configure>", self._on_canvas_resize)
     
     def _on_canvas_resize(self, event):
-        """Canvasサイズ変更時にテキストを中央に移動"""
+        """Keep preview placeholder centered."""
         self.preview_canvas.coords(self.preview_text, event.width // 2, event.height // 2)
         self._canvas_size = (event.width, event.height)
+
+    def refresh_driver_status(self):
+        self.driver_status = diagnose_custom_camera_registration()
+        status = self.driver_status
+
+        if status.status_code == "ok":
+            text = "Custom Driver: Ready"
+            color = Theme.STATUS_SUCCESS
+        elif status.status_code == "path_mismatch":
+            text = "Custom Driver: Path mismatch (Install to repair)"
+            color = Theme.STATUS_WARNING
+        elif status.status_code == "not_registered":
+            text = "Custom Driver: Not registered (Install)"
+            color = Theme.STATUS_WARNING
+        elif status.status_code == "dll_not_found":
+            text = "Custom Driver: DLL not found"
+            color = Theme.STATUS_ERROR
+        else:
+            text = "Custom Driver: Registry check failed"
+            color = Theme.STATUS_ERROR
+
+        self.label_driver.configure(text=text, text_color=color)
+        print(
+            f"[DriverDiagnostic] code={status.status_code} "
+            f"dll={status.dll_path} registered={status.registered_path}"
+        )
 
     def register_driver(self):
         from .virtual_cam import register_custom_camera
         ok, _code, message = register_custom_camera()
         if ok:
-            self.label_status.configure(text=f"● {message}", text_color=Theme.STATUS_SUCCESS)
+            self.label_status.configure(text=f"{message}", text_color=Theme.STATUS_SUCCESS)
         else:
-            self.label_status.configure(text=f"● Install failed: {message}", text_color=Theme.STATUS_ERROR)
+            self.label_status.configure(text=f"Install failed: {message}", text_color=Theme.STATUS_ERROR)
+        self.refresh_driver_status()
 
     def unregister_driver(self):
         from .virtual_cam import unregister_custom_camera
         ok, _code, message = unregister_custom_camera()
         if ok:
-            self.label_status.configure(text=f"● {message}", text_color=Theme.STATUS_SUCCESS)
+            self.label_status.configure(text=f"{message}", text_color=Theme.STATUS_SUCCESS)
         else:
-            self.label_status.configure(text=f"● Uninstall failed: {message}", text_color=Theme.STATUS_ERROR)
+            self.label_status.configure(text=f"Uninstall failed: {message}", text_color=Theme.STATUS_ERROR)
+        self.refresh_driver_status()
 
     def toggle_connection(self):
         if not self.is_running and not self._connecting:
@@ -257,9 +289,9 @@ class ReceiverApp(ctk.CTkFrame):
             self.stop_receiving()
 
     def discover_servers(self):
-        """LANでサーバーを自動検出"""
+        """Auto-discover servers on LAN."""
         self.btn_discover.configure(state="disabled", text="🔍  Searching...")
-        self.label_status.configure(text="● Searching for servers...", text_color=Theme.STATUS_WARNING)
+        self.label_status.configure(text="Searching for servers...", text_color=Theme.STATUS_WARNING)
         
         def search():
             discovery = ServerDiscovery(timeout=3.0)
@@ -269,7 +301,7 @@ class ReceiverApp(ctk.CTkFrame):
         threading.Thread(target=search, daemon=True).start()
     
     def update_server_list(self, servers):
-        """検出結果をUIに反映"""
+        """Update discovered servers in UI."""
         self.btn_discover.configure(state="normal", text="🔍  Auto Discover")
         self.discovered_servers = servers
         
@@ -282,36 +314,36 @@ class ReceiverApp(ctk.CTkFrame):
                 self.entry_ip.delete(0, "end")
                 self.entry_ip.insert(0, servers[0]['ip'])
                 self.label_status.configure(
-                    text=f"● Found: {servers[0]['name']} — Connecting...", 
+                    text=f"Found: {servers[0]['name']} - Connecting...",
                     text_color=Theme.STATUS_SUCCESS
                 )
                 self.master.after(100, self.start_receiving)
             else:
                 self.label_status.configure(
-                    text=f"● {len(servers)} servers found — Select from dropdown", 
+                    text=f"{len(servers)} servers found - Select from dropdown", 
                     text_color=Theme.STATUS_SUCCESS
                 )
         else:
             self.server_dropdown.configure(values=["No servers found"])
             self.server_dropdown.set("No servers found")
             self.label_status.configure(
-                text="● No servers found — Enter IP manually", 
+                text="No servers found - Enter IP manually", 
                 text_color=Theme.STATUS_WARNING
             )
     
     def on_server_selected(self, choice):
-        """ドロップダウンでサーバー選択時にIPを入力欄に反映して接続"""
+        """Handle selecting a discovered server."""
         if not self.discovered_servers:
             return
         
-        # 選択されたサーバーを検索
+        # Look up selected server entry
         for server in self.discovered_servers:
             display_name = f"{server['name']} - {server['ip']}:{server['port']}"
             if display_name == choice:
                 self.entry_ip.delete(0, "end")
                 self.entry_ip.insert(0, server['ip'])
                 self.label_status.configure(
-                    text=f"● Selected: {server['name']} — Connecting...", 
+                    text=f"Selected: {server['name']} - Connecting...", 
                     text_color=Theme.STATUS_SUCCESS
                 )
                 if self.is_running:
@@ -327,22 +359,38 @@ class ReceiverApp(ctk.CTkFrame):
         self._connecting = True
         self._cancel_connect = False
 
+        self.refresh_driver_status()
+        driver_status = self.driver_status
+        prefer_custom = driver_status is not None and driver_status.status_code == "ok"
+
         ip = self.entry_ip.get()
         url = f"http://{ip}:8000/stream.mjpg"
 
-        self.btn_connect.configure(text="⏳  Connecting...", state="disabled")
-        self.label_status.configure(text="● Connecting...", text_color=Theme.STATUS_WARNING)
-        
+        self.btn_connect.configure(text="Connecting...", state="disabled")
+        if prefer_custom:
+            self.label_status.configure(text="Connecting...", text_color=Theme.STATUS_WARNING)
+        else:
+            self.label_status.configure(
+                text="Connecting... Custom unavailable, using fallback virtual camera",
+                text_color=Theme.STATUS_WARNING,
+            )
+
         def worker():
             client = None
             vcam = None
+            start_code = ""
+            start_message = ""
             try:
                 client = StreamClient(url)
                 client.start()
-                
-                # Initialize Virtual Camera (Standard HD resolution)
-                vcam = VirtualCamera(width=1280, height=720)
-                vcam.start()
+
+                vcam = VirtualCamera(
+                    width=1280,
+                    height=720,
+                    prefer_custom=prefer_custom,
+                    allow_custom_when_mismatch=False,
+                )
+                _is_custom, start_code, start_message = vcam.start()
             except Exception as e:
                 if client:
                     client.stop()
@@ -350,24 +398,28 @@ class ReceiverApp(ctk.CTkFrame):
                     vcam.stop()
                 self.master.after(0, lambda: self._on_connect_failed(e))
                 return
-            
-            self.master.after(0, lambda: self._on_connect_success(client, vcam))
+
+            self.master.after(
+                0,
+                lambda: self._on_connect_success(client, vcam, start_code, start_message, driver_status),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_connect_success(self, client, vcam):
+    def _on_connect_success(self, client, vcam, start_code="", start_message="", driver_status=None):
         if self._cancel_connect:
             client.stop()
-            vcam.stop()
+            if vcam:
+                vcam.stop()
             self._connecting = False
             self._cancel_connect = False
             self.btn_connect.configure(
-                text="▶  Connect",
+                text="Connect",
                 fg_color=Theme.ACCENT,
                 hover_color=Theme.ACCENT_HOVER,
                 state="normal"
             )
-            self.label_status.configure(text="● Disconnected", text_color=Theme.STATUS_IDLE)
+            self.label_status.configure(text="Disconnected", text_color=Theme.STATUS_IDLE)
             return
 
         self.client = client
@@ -375,22 +427,38 @@ class ReceiverApp(ctk.CTkFrame):
         self.is_running = True
         self._connecting = False
         self.btn_connect.configure(
-            text="■  Disconnect", 
+            text="Disconnect",
             fg_color=Theme.ACCENT_DANGER,
             hover_color=Theme.ACCENT_DANGER_HOVER,
             state="normal"
         )
-        self.label_status.configure(text="● Connected — Streaming", text_color=Theme.STATUS_SUCCESS)
-        
+
+        if start_code == "fallback_started":
+            if driver_status and driver_status.status_code != "ok":
+                self.label_status.configure(
+                    text="Connected - Using fallback virtual camera (Install to repair custom driver)",
+                    text_color=Theme.STATUS_WARNING,
+                )
+            else:
+                self.label_status.configure(
+                    text="Connected - Using fallback virtual camera",
+                    text_color=Theme.STATUS_WARNING,
+                )
+        else:
+            self.label_status.configure(text="Connected - Streaming", text_color=Theme.STATUS_SUCCESS)
+
+        if start_message:
+            print(f"[VirtualCameraStart] {start_message}")
+
         self.thread = threading.Thread(target=self.process_stream, daemon=True)
         self.thread.start()
 
     def _on_connect_failed(self, error):
         self._connecting = False
         self._cancel_connect = False
-        self.label_status.configure(text=f"● Error: {error}", text_color=Theme.STATUS_ERROR)
+        self.label_status.configure(text=f"Error: {error}", text_color=Theme.STATUS_ERROR)
         self.btn_connect.configure(
-            text="▶  Connect", 
+            text="Connect",
             fg_color=Theme.ACCENT,
             hover_color=Theme.ACCENT_HOVER,
             state="normal"
@@ -406,18 +474,107 @@ class ReceiverApp(ctk.CTkFrame):
         if self.virtual_cam:
             self.virtual_cam.stop()
             self.virtual_cam = None
-        
+
         self.photo_image = None
         self.btn_connect.configure(
-            text="▶  Connect", 
+            text="Connect",
             fg_color=Theme.ACCENT,
             hover_color=Theme.ACCENT_HOVER,
             state="normal"
         )
-        self.label_status.configure(text="● Disconnected", text_color=Theme.STATUS_IDLE)
-        
+        self.label_status.configure(text="Disconnected", text_color=Theme.STATUS_IDLE)
+
         self.preview_canvas.delete("preview")
         self.preview_canvas.itemconfig(self.preview_text, text="Stream Preview")
+
+    def _ensure_virtual_camera_for_frame(self, frame):
+        if not self.is_running or frame is None:
+            return False
+
+        h, w = frame.shape[:2]
+        if w <= 0 or h <= 0:
+            return False
+
+        prefer_custom = self.driver_status is not None and self.driver_status.status_code == "ok"
+
+        if self.virtual_cam is None:
+            self.master.after(
+                0,
+                lambda w=w, h=h: self.label_status.configure(
+                    text=f"Starting virtual camera ({w}x{h})...",
+                    text_color=Theme.STATUS_WARNING,
+                ),
+            )
+            try:
+                vcam = VirtualCamera(
+                    width=w,
+                    height=h,
+                    prefer_custom=prefer_custom,
+                    allow_custom_when_mismatch=False,
+                )
+                _is_custom, start_code, _start_message = vcam.start()
+                self.virtual_cam = vcam
+
+                if start_code == "fallback_started" and self.driver_status and self.driver_status.status_code != "ok":
+                    status_text = "Connected - Using fallback virtual camera (Install to repair custom driver)"
+                    status_color = Theme.STATUS_WARNING
+                else:
+                    status_text = f"Connected - Streaming ({w}x{h})"
+                    status_color = Theme.STATUS_SUCCESS
+
+                self.master.after(
+                    0,
+                    lambda text=status_text, color=status_color: self.label_status.configure(
+                        text=text,
+                        text_color=color,
+                    ),
+                )
+                return True
+            except Exception as error:
+                self.master.after(
+                    0,
+                    lambda error=error: self.label_status.configure(
+                        text=f"Virtual camera start failed: {error}",
+                        text_color=Theme.STATUS_ERROR,
+                    ),
+                )
+                return False
+
+        if self.virtual_cam.width == w and self.virtual_cam.height == h:
+            return True
+
+        self.master.after(
+            0,
+            lambda w=w, h=h: self.label_status.configure(
+                text=f"Reconfiguring virtual camera ({w}x{h})...",
+                text_color=Theme.STATUS_WARNING,
+            ),
+        )
+        try:
+            self.virtual_cam.reconfigure(w, h)
+            if self.driver_status and self.driver_status.status_code != "ok":
+                status_text = "Connected - Using fallback virtual camera (Install to repair custom driver)"
+                status_color = Theme.STATUS_WARNING
+            else:
+                status_text = f"Connected - Streaming ({w}x{h})"
+                status_color = Theme.STATUS_SUCCESS
+            self.master.after(
+                0,
+                lambda text=status_text, color=status_color: self.label_status.configure(
+                    text=text,
+                    text_color=color,
+                ),
+            )
+            return True
+        except Exception as error:
+            self.master.after(
+                0,
+                lambda error=error: self.label_status.configure(
+                    text=f"Reconfigure failed: {error}",
+                    text_color=Theme.STATUS_ERROR,
+                ),
+            )
+            return False
 
     def process_stream(self):
         if not self.client:
@@ -426,22 +583,27 @@ class ReceiverApp(ctk.CTkFrame):
         for frame in self.client.get_frames():
             if not self.is_running:
                 break
-            
-            # Send to Virtual Camera
-            if self.virtual_cam:
-                self.virtual_cam.send_frame(frame)
+
+            if not self._ensure_virtual_camera_for_frame(frame):
+                if not self.is_running:
+                    break
+                time.sleep(self._virtual_cam_retry_sec)
+                continue
+
+            if self.virtual_cam and not self.virtual_cam.send_frame(frame):
+                time.sleep(self._virtual_cam_retry_sec)
+                continue
 
             # Skip frame if previous frame is still being processed
             if self._pending_frame:
                 continue
 
-            # プレビュー無効時または最小化時はプレビュー処理をスキップ
+            # Skip preview work when disabled/minimized
             if not self.preview_enabled or self._is_minimized():
                 if not self.preview_enabled:
                     self.master.after(0, lambda: self._show_preview_message("Preview Disabled"))
                 else:
                     self.master.after(0, lambda: self._show_preview_message("Minimized (Preview Paused)"))
-                import time
                 time.sleep(0.1)
                 continue
             
@@ -455,8 +617,8 @@ class ReceiverApp(ctk.CTkFrame):
                 
                 h, w = frame.shape[:2]
                 ratio = min(canvas_width / w, canvas_height / h)
-                preview_width = int(w * ratio)
-                preview_height = int(h * ratio)
+                preview_width = max(1, int(w * ratio))
+                preview_height = max(1, int(h * ratio))
                 frame_resized = cv2.resize(frame, (preview_width, preview_height))
                 
                 # Convert to RGB
@@ -469,7 +631,7 @@ class ReceiverApp(ctk.CTkFrame):
                 print(f"Preview processing error: {e}")
 
     def _draw_preview(self, frame_rgb, canvas_width, canvas_height):
-        """Draw pre-processed frame on canvas (runs on main thread)"""
+        """Draw pre-processed frame on canvas (runs on main thread)."""
         if not self.is_running:
             self._pending_frame = False
             return
@@ -491,31 +653,34 @@ class ReceiverApp(ctk.CTkFrame):
             self._pending_frame = False
 
     def toggle_preview(self):
-        """プレビューの有効/無効を切り替え"""
+        """Toggle preview visibility."""
         self.preview_enabled = not self.preview_enabled
         if self.preview_enabled:
             self.btn_preview_toggle.configure(text="👁", text_color=Theme.ACCENT)
         else:
-            self.btn_preview_toggle.configure(text="�", text_color=Theme.TEXT_SECONDARY)
+            self.btn_preview_toggle.configure(text="X", text_color=Theme.TEXT_SECONDARY)
             self._show_preview_message("Preview Disabled")
     
     def _is_minimized(self):
-        """ウィンドウが最小化されているか確認"""
+        """Return whether the window is minimized."""
         try:
             return self.master.state() == "iconic"
         except Exception:
             return False
 
     def _show_preview_message(self, message):
-        """プレビューにメッセージを表示"""
+        """Show a message in the preview area."""
         self.preview_canvas.delete("preview")
         self.preview_canvas.itemconfig(self.preview_text, text=message)
 
     def _on_back(self):
-        """Handle back button click"""
+        """Handle back button click."""
         if self.on_back:
             self.on_back()
 
     def cleanup(self):
-        """Clean up resources before destroying"""
+        """Clean up resources before destroying."""
         self.stop_receiving()
+
+
+
