@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import cv2
 import threading
+import math
 from PIL import Image, ImageTk
 from .camera import Camera, get_available_cameras, get_camera_diagnostics
 from .server import StreamServer
@@ -27,6 +28,7 @@ class SenderApp(ctk.CTkFrame):
         self._starting = False
         self._stopping = False
         self.preview_enabled = True
+        self._last_stream_resolution = None
 
         self.setup_ui()
         self.refresh_camera_list()
@@ -81,7 +83,15 @@ class SenderApp(ctk.CTkFrame):
             font=(Theme.FONT_FAMILY, 13, "bold"),
             text_color=Theme.TEXT_ACCENT
         )
-        self.label_ip.pack(anchor="w", padx=Theme.PAD_MD, pady=(0, Theme.PAD_SM))
+        self.label_ip.pack(anchor="w", padx=Theme.PAD_MD, pady=(0, Theme.PAD_XS))
+
+        self.label_stream_info = ctk.CTkLabel(
+            self.frame_url,
+            text="Camera: -",
+            font=Theme.FONT_SMALL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        self.label_stream_info.pack(anchor="w", padx=Theme.PAD_MD, pady=(0, Theme.PAD_SM))
 
         # Controls card
         self.frame_controls = ctk.CTkFrame(
@@ -202,6 +212,30 @@ class SenderApp(ctk.CTkFrame):
     def _on_canvas_resize(self, event):
         """Keep preview placeholder centered when the canvas size changes."""
         self.preview_canvas.coords(self.preview_text, event.width // 2, event.height // 2)
+
+    @staticmethod
+    def _format_aspect_ratio(width, height):
+        width = int(width)
+        height = int(height)
+        if width <= 0 or height <= 0:
+            return "unknown"
+        divisor = math.gcd(width, height)
+        return f"{width // divisor}:{height // divisor}"
+
+    def _set_stream_info(self, text):
+        self.label_stream_info.configure(text=text)
+
+    @staticmethod
+    def _extract_resolution_pair(value):
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            try:
+                w = int(value[0])
+                h = int(value[1])
+                if w > 0 and h > 0:
+                    return w, h
+            except Exception:
+                return 0, 0
+        return 0, 0
 
     def refresh_camera_list(self):
         """Refresh the camera list using current diagnostics."""
@@ -326,6 +360,7 @@ class SenderApp(ctk.CTkFrame):
         self.server = server
         self.is_running = True
         self._starting = False
+        self._last_stream_resolution = None
         self.btn_toggle.configure(
             text="Stop Streaming",
             fg_color=Theme.ACCENT_DANGER,
@@ -334,11 +369,31 @@ class SenderApp(ctk.CTkFrame):
         )
         self.combo_camera.configure(state="disabled")
         self.btn_refresh.configure(state="disabled")
+
+        resolution_info = camera.get_resolution_info()
+        actual_w, actual_h = camera.get_current_resolution()
+        reported_w, reported_h = self._extract_resolution_pair(resolution_info.get("reported"))
+        aspect = self._format_aspect_ratio(actual_w, actual_h)
+        selected_by = str(resolution_info.get("selected_by", "unknown"))
+        attempts = resolution_info.get("candidates_tried", [])
+        attempt_count = len(attempts) if isinstance(attempts, list) else 0
+
+        self._set_stream_info(
+            f"Camera: {actual_w}x{actual_h} ({aspect}) | reported: {reported_w}x{reported_h}"
+        )
+        print(
+            "Sender camera resolution: "
+            f"selected_by={selected_by} "
+            f"reported={reported_w}x{reported_h} "
+            f"actual={actual_w}x{actual_h} "
+            f"attempts={attempt_count}"
+        )
         self.update_preview()
 
     def _on_start_failed(self, error):
         self._starting = False
         self.is_running = False
+        self._last_stream_resolution = None
         self.btn_toggle.configure(
             text="Start Streaming",
             fg_color=Theme.ACCENT,
@@ -347,6 +402,7 @@ class SenderApp(ctk.CTkFrame):
         )
         self.combo_camera.configure(state="readonly")
         self.btn_refresh.configure(state="normal")
+        self._set_stream_info("Camera: -")
         print(f"Error starting stream: {error}")
 
     def stop_streaming(self):
@@ -369,6 +425,8 @@ class SenderApp(ctk.CTkFrame):
         
         self.preview_canvas.delete("preview")
         self.preview_canvas.itemconfig(self.preview_text, text="Camera Preview")
+        self._last_stream_resolution = None
+        self._set_stream_info("Camera: -")
 
         def worker():
             if self.server:
@@ -435,6 +493,17 @@ class SenderApp(ctk.CTkFrame):
                     canvas_height = 360
                 
                 h, w = frame.shape[:2]
+                if self._last_stream_resolution != (w, h):
+                    self._last_stream_resolution = (w, h)
+                    if self.camera:
+                        info = self.camera.get_resolution_info()
+                        reported_w, reported_h = self._extract_resolution_pair(info.get("reported"))
+                    else:
+                        reported_w, reported_h = 0, 0
+                    aspect = self._format_aspect_ratio(w, h)
+                    self._set_stream_info(
+                        f"Camera: {w}x{h} ({aspect}) | reported: {reported_w}x{reported_h}"
+                    )
                 ratio = min(canvas_width / w, canvas_height / h)
                 preview_width = max(1, int(w * ratio))
                 preview_height = max(1, int(h * ratio))
