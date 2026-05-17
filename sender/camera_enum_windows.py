@@ -319,8 +319,13 @@ def _sort_candidates(candidates: Iterable[OpenCandidate]) -> list[OpenCandidate]
 def enumerate_camera_descriptors() -> list[CameraDescriptor]:
     descriptors: list[CameraDescriptor] = []
     existing_keys: set[str] = set()
-    by_name_ordinal: dict[tuple[str, int], CameraDescriptor] = {}
+    unique_dshow_by_name: dict[str, CameraDescriptor] = {}
     dshow_names = _enumerate_dshow_names()
+    dshow_name_totals: dict[str, int] = {}
+    for name in dshow_names:
+        normalized = _normalize_name(name)
+        dshow_name_totals[normalized] = dshow_name_totals.get(normalized, 0) + 1
+
     if dshow_names:
         registry_buckets = _enumerate_dshow_registry_clsid_buckets()
         name_counts: dict[str, int] = {}
@@ -344,17 +349,27 @@ def enumerate_camera_descriptors() -> list[CameraDescriptor]:
             descriptor.add_candidate("DSHOW", index, confidence=120)
             descriptor.preferred_backend = "DSHOW"
             descriptors.append(descriptor)
-            by_name_ordinal[(normalized, ordinal)] = descriptor
+            if dshow_name_totals.get(normalized) == 1:
+                unique_dshow_by_name[normalized] = descriptor
 
     msmf_devices = _enumerate_msmf_devices()
     if msmf_devices:
+        msmf_name_totals: dict[str, int] = {}
+        for msmf_device in msmf_devices:
+            normalized = _normalize_name(msmf_device.name)
+            msmf_name_totals[normalized] = msmf_name_totals.get(normalized, 0) + 1
+
         name_counts: dict[str, int] = {}
         for index, msmf_device in enumerate(msmf_devices):
             normalized = _normalize_name(msmf_device.name)
             name_counts[normalized] = name_counts.get(normalized, 0) + 1
             ordinal = name_counts[normalized]
 
-            descriptor = by_name_ordinal.get((normalized, ordinal))
+            can_merge_by_name = (
+                dshow_name_totals.get(normalized) == 1
+                and msmf_name_totals.get(normalized) == 1
+            )
+            descriptor = unique_dshow_by_name.get(normalized) if can_merge_by_name else None
             if descriptor is None:
                 if msmf_device.symbolic_link:
                     moniker_id = f"msmf-link:{msmf_device.symbolic_link.casefold()}"
@@ -365,7 +380,6 @@ def enumerate_camera_descriptors() -> list[CameraDescriptor]:
 
                 descriptor = CameraDescriptor(key=key, name=msmf_device.name, moniker_id=moniker_id)
                 descriptors.append(descriptor)
-                by_name_ordinal[(normalized, ordinal)] = descriptor
 
             has_dshow = "dshow" in descriptor.source_flags
             descriptor.source_flags.add("msmf")

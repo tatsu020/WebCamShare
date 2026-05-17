@@ -496,6 +496,8 @@ class ReceiverApp(ctk.CTkFrame):
             return False
 
         prefer_custom = self.driver_status is not None and self.driver_status.status_code == "ok"
+        if self.virtual_cam is not None and getattr(self.virtual_cam, "cam", None) is None:
+            self.virtual_cam = None
 
         if self.virtual_cam is None:
             self.master.after(
@@ -567,6 +569,13 @@ class ReceiverApp(ctk.CTkFrame):
             )
             return True
         except Exception as error:
+            broken_vcam = self.virtual_cam
+            self.virtual_cam = None
+            if broken_vcam:
+                try:
+                    broken_vcam.stop()
+                except Exception:
+                    pass
             self.master.after(
                 0,
                 lambda error=error: self.label_status.configure(
